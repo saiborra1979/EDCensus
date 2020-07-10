@@ -4,17 +4,17 @@ SCRIPT USING FALSE-POSITIVE CONTROL LASSO
 
 import sys
 
-if sys.stdout.isatty():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--nlags', type=int, default=10, help='Max number of lags to use in model')
-    parser.add_argument('--lead', type=int, default=1, help='Which lead of the data to predict?')
-    parser.add_argument('--day', type=int, default=1, help='Which day of 2020 to predict? (max==181)')
-    args = parser.parse_args()
-    nlags, lead, day = args.nlags, args.lead, args.day
-    print(args)
-else:  # Debugging in PyCharm
-    nlags, lead, day = 10, 5, 181
+#if sys.stdout.isatty():
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--nlags', type=int, default=10, help='Max number of lags to use in model')
+parser.add_argument('--lead', type=int, default=1, help='Which lead of the data to predict?')
+parser.add_argument('--day', type=int, default=1, help='Which day of 2020 to predict? (max==181)')
+args = parser.parse_args()
+nlags, lead, day = args.nlags, args.lead, args.day
+print(args)
+#else:  # Debugging in PyCharm
+#    nlags, lead, day = 10, 5, 181
 
 import os
 from time import time
@@ -99,7 +99,7 @@ ahat_star = elnet.intercept_path_[jj_star]
 eta_test = Xmat_test.dot(bhat_star) + ahat_star
 df_res = pd.DataFrame({'y':y_test,'pred':eta_test,'dates':dates[idx_test],'lead':lead})
 # Save predictions for later
-fn_res = 'lasso_res_'+d_test.strftime('%Y_%m_%d')+'.csv'
+fn_res = 'lasso_res_'+d_test.strftime('%Y_%m_%d')+'_lead'+str(lead)+'.csv'
 df_res.to_csv(os.path.join(dir_test, fn_res))
 
 # Calculate the coefficients
@@ -107,5 +107,5 @@ df_bhat = pd.Series(bhat_star,index=cn_X).reset_index()
 df_bhat = df_bhat.rename(columns={'level_0':'cn', 'level_1':'lag', 0:'bhat_z'})
 df_bhat.lag = df_bhat.lag.str.replace('lag_','').astype(int)
 df_bhat = df_bhat.assign(bhat = lambda x: x.bhat_z/enc.scale_,lead=lead,day=d_test)
-fn_bhat = 'lasso_bhat_'+d_test.strftime('%Y_%m_%d')+'.csv'
+fn_bhat = 'lasso_bhat_'+d_test.strftime('%Y_%m_%d')+'_lead'+str(lead)+'.csv'
 df_bhat.to_csv(os.path.join(dir_test, fn_bhat))
