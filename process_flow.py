@@ -120,6 +120,7 @@ dat_labs = pd.concat(holder).reset_index(None, True)
 del holder, tmp
 dat_labs['order_time'] = pd.to_datetime(dat_labs.date + ' ' + dat_labs.time,format='%d/%m/%Y %I:%M:%S %p')
 dat_labs.drop(columns=['date','time'],inplace=True)
+pd.DataFrame({'lab':dat_labs.name.unique()}).to_csv(os.path.join(dir_output,'u_labs.csv'))
 # Ensure all days are found
 udt = [first_day] + list(dat_labs.order_time.dt.strftime(fmt).unique())
 assert dt_range.isin(udt).all()
@@ -145,6 +146,7 @@ for fn in fn_DI:
         columns=cn_DI)
     holder.append(tmp)
 dat_DI = pd.concat(holder).reset_index(None, True)
+pd.DataFrame({'lab':dat_DI.name.unique()}).to_csv(os.path.join(dir_output,'u_DI.csv'))
 del holder, tmp
 dat_DI['order_time'] = pd.to_datetime(dat_DI.date + ' ' + dat_DI.time,format='%d/%m/%Y %I:%M:%S %p')
 dat_DI.drop(columns=['date','time'],inplace=True)
