@@ -3,25 +3,18 @@ SCRIPT TO PERFORM RAW PROCESSING
 NUMBER OF PATIENT AT EACH TIME POINT THAT A NEW PATIENT ARRIVES OR IS DISCHARGED
 """
 
-import sys
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--bfreq', type=str, default='1 hour', help='Time binning frequency')
+parser.add_argument('--ylbl', type=str, default='census_max', help='Target label')
+parser.add_argument('--nlags', type=int, default=10, help='Max number of lags')
+args = parser.parse_args()
+print(args)
+bfreq, ylbl, nlags = args.bfreq, args.ylbl, args.nlags
 
-if sys.stdout.isatty():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--bfreq', type=str, default='1 hour', help='Time binning frequency')
-    parser.add_argument('--ylbl', type=str, default='census_max', help='Target label')
-    parser.add_argument('--nlags', type=int, default=10, help='Max number of lags')
-    args = parser.parse_args()
-    bfreq = args.bfreq
-    ylbl = args.ylbl
-    nlags = args.nlags
-    print(args)
-else:  # Debugging in PyCharm
-    bfreq = '1 hour'
-    ylbl = 'census_max'
-    nlags = 10
+# Debugging in PyCharm
+bfreq = '1 hour'; ylbl = 'census_max'; nlags = 10
 
-# sys.exit('done argparse')
 
 # Load in the required modules
 import os
