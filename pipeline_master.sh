@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # SHELL PIPELINE TO REPLICATE RESULTS
-
 echo "THE STARTING DIRECTORY"
 pwd
 
@@ -17,29 +16,25 @@ else
 	conda activate CensusFlow
 fi
 
-# (1) Get the demographic data
+echo "(1) Get the demographic data"
 #python process_demographics.py
 
-# (2) Generate the Xy matrix
+echo "(2) Generate the Xy matrix"
 #python process_flow.py --bfreq "1 hour" --ylbl "census_max" --nlags 10
 
-# (3) Get descriptive statistics
+echo "(3) Get descriptive statistics"
 #python explore_AR.py
 
-# (4) Fit Lasso model over various leads/days
-ndays=182
-nleads=9
-ntot=$(($(expr $ndays \* $nleads - 1)))
-echo "There are "$ndays" days and "$nleads" nleads, and a total of "$(($ntot+1))" scripts"
-
-if [[ $(command -v qsub | wc -l) -eq 1 ]]; then
-	echo "RUNNING MODEL FITTING ON HPF"
-	qsub -t 0-$ntot -F "$ndays" pipeline_HPF.sh
+echo "(4) Fit Lasso model over various days"
+if [ $loc != "mnt" ]; then
+	#qsub -N local_lead4 -F "4" pipeline_HPF.sh
 else
-	echo "RUN MODEL FITTING LOCALLY LOCALLY"
-	python run_lasso.py --day 0 --lead 1 --nlags 10
+	echo "WE ARE ON LOCAL"
+	for tt in {0..1..1}; do
+    echo "Day: "$tt
+    python run_mdl.py --day $tt --lead 4 --nlags 10 --model local
+  done
 fi
 
 
 echo "END OF SCRIPT"
-

@@ -16,12 +16,13 @@ args = parser.parse_args()
 print(args)
 nlags, lead, day, model = args.nlags, args.lead, args.day, args.model
 
-# Debugging in PyCharm
-nlags, lead, day, model = 10, 3, 75, 'lasso'
+# # Debugging in PyCharm
+# nlags, lead, day, model = 0, 4, 90, 'local'
 
 import os
 import numpy as np
 import pandas as pd
+from sklearn.metrics import r2_score
 
 dir_base = os.getcwd()
 dir_figures = os.path.join(dir_base, '..', 'figures')
@@ -33,7 +34,7 @@ if not os.path.exists(dir_test):
 
 idx = pd.IndexSlice
 
-#############################
+####################################
 # --- STEP 1: LOAD/CREATE DATA --- #
 print('# --- STEP 1: LOAD/CREATE DATA --- #')
 
@@ -47,12 +48,24 @@ lags = np.arange(nlags+1)
 leads = (np.arange(nlags)+1)
 
 # Convert into X/y matrices
-Ymat = df_lead_lags.loc[:,idx[:,['lead_'+str(lead) for lead in leads]]].values
+yval = df_lead_lags.loc[:,idx[:,'lead_'+str(lead)]].values.flatten()
 Xmat = df_lead_lags.loc[:,idx[:,['lag_'+str(lag) for lag in lags]]].values
 cn_Y = df_lead_lags.head(1).loc[:,idx[:,['lead_'+str(lead) for lead in leads]]].columns
 cn_X = df_lead_lags.head(1).loc[:,idx[:,['lag_'+str(lag) for lag in lags]]].columns
+# Not using dates.dt.weekofyear for now
+tmat = pd.concat([pd.get_dummies(dates.dt.dayofweek).add_prefix('dow_'),
+                  pd.get_dummies(dates.dt.hour).add_prefix('hour_'),
+                  (dates - dates.min()).dt.days],1).rename(columns={'date':'trend'})
+tmat.columns = pd.MultiIndex.from_product([tmat.columns, ['lag_0']])
+cn_X = cn_X.append(tmat.columns)
+Xmat = np.hstack([Xmat, tmat.values])
+assert cn_X.shape[0] == Xmat.shape[1]
 
-d_pred = pd.date_range('2020-01-01',dates.max(),freq='1d')
+######################################
+# --- STEP 2: CREATE DATE-SPLITS --- #
+print('# --- STEP 2: CREATE DATE-SPLITS --- #')
+
+d_pred = pd.date_range('2020-01-01', dates.max(), freq='1d')
 d_test = d_pred[day]
 print('Predicting %i hours ahead for testing day: %s\nDay %i of %i' %
       (lead, d_test, day+1, len(d_pred)))
@@ -63,27 +76,18 @@ d_valid = d_test - pd.DateOffset(weeks=1)
 idx_train = (dates < d_valid).values
 idx_valid = ((dates >= d_valid) & (dates < d_test)).values
 idx_test = ((dates >= d_test) & (dates < d_test + pd.DateOffset(days=1))).values
+assert sum(idx_valid) == 24*7
 assert sum(idx_test) <= 24
 
 # Split matrices
-Xmat_train, y_train = Xmat[idx_train], Ymat[idx_train,lead]
-Xmat_valid, y_valid = Xmat[idx_valid], Ymat[idx_valid,lead]
-Xmat_test, y_test = Xmat[idx_test], Ymat[idx_test, lead]
+Xmat_train, y_train = Xmat[idx_train], yval[idx_train]
+Xmat_valid, y_valid = Xmat[idx_valid], yval[idx_valid]
+Xmat_test, y_test = Xmat[idx_test], yval[idx_test]
 print('Training size: %i, validation size: %i, test size: %i' %
       (Xmat_train.shape[0], Xmat_valid.shape[0], Xmat_test.shape[0]))
 
 ###########################################
-# --- STEP 2: TRAIN MODEL AND PREDICT --- #
-
-from sklearn.metrics import r2_score
-q1 = pd.DataFrame({'y':y_train}).tail(y_valid.shape[0]).assign(tt='train')
-q2 = pd.DataFrame({'y':y_valid}).assign(tt='valid')
-q3 = pd.DataFrame({'y':y_test}).assign(tt='test')
-dat = pd.concat([q1, q2, q3]).reset_index(None, True).reset_index()
-gg = (ggplot(dat, aes(x='index',y='y',color='tt')) +
-      geom_point() + geom_line() + theme_bw())
-gg.save(os.path.join(dir_figures,'tmp.png'))
-
+# --- STEP 3: TRAIN MODEL AND PREDICT --- #
 
 mdls = __import__('mdls.' + model)
 assert hasattr(mdls, model)
@@ -94,14 +98,16 @@ mdl = tmp(model=model, lead=lead, date=d_test, cn=cn_X)
 # Fit, tune, save
 mdl.fit(X=Xmat_train, y=y_train)
 mdl.tune(X=Xmat_valid, y=y_valid)
-mdl.save(folder=dir_test)
+# mdl.save(folder=dir_test)
 # mdl.load(folder=dir_test)
+eta_test = mdl.predict(X=Xmat_test)
+r2_test = r2_score(y_test, eta_test)
+print('Test R-squared: %0.3f' % r2_test)
 
 ####################################
 # --- STEP 3: SAVE PREDICTIONS --- #
 
 # Get predictions
-eta_test = mdl.predict(Xmat_test)
 fn_res = mdl.fn.replace('.pkl','.csv').replace('mdl_','res_')
 # Save predictions for later
 df_res = pd.DataFrame({'y':y_test,'pred':eta_test,'dates':dates[idx_test],'lead':lead, 'model':model})
