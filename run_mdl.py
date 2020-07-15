@@ -17,7 +17,7 @@ print(args)
 nlags, lead, day, model = args.nlags, args.lead, args.day, args.model
 
 # # Debugging in PyCharm
-# nlags, lead, day, model = 0, 4, 90, 'local'
+# nlags, lead, day, model = 1, 4, 76, 'local'
 
 import os
 import numpy as np
@@ -111,4 +111,4 @@ print('Test R-squared: %0.3f' % r2_test)
 fn_res = mdl.fn.replace('.pkl','.csv').replace('mdl_','res_')
 # Save predictions for later
 df_res = pd.DataFrame({'y':y_test,'pred':eta_test,'dates':dates[idx_test],'lead':lead, 'model':model})
-df_res.to_csv(os.path.join(dir_test, fn_res), index=False)
+df_res.to_csv(os.path.join(dir_test, fn_res), index=True)

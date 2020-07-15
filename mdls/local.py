@@ -146,12 +146,19 @@ class mdl():
         idx_val = cvec(np.arange(nval) + self.idx_train.max() + 1)
         Wmat = pairwise_distances(self.idx_enc.transform(idx_val),
                                   self.idx_enc.transform(self.idx_train)).T
-        ll_seq = np.exp(np.linspace(np.log(0.001), np.log(20), num=25))
-        # Tune accross the different length scales
+        ll_seq = np.exp(np.linspace(np.log(0.001), np.log(20), num=30))
+        wmat_seq = [np.mean(np.exp(-0.5 * Wmat ** 2 / ll),1) for ll in ll_seq]
+        # Fit accross different length scales
         stime = time()
-        r2_ll = Parallel(n_jobs=10)(delayed(r2_from_ll)(ll=ll, wmat=Wmat,xval=Xtil, yval=y, X=self.Xtil, y=self.y,verbose=False) for ll in ll_seq)
-        print('Took %0.1f seconds to run' % (time() - stime))
-        res = pd.DataFrame({'ll':ll_seq, 'r2':r2_ll})
+        lst = Parallel(n_jobs=10)(delayed(fpc)(X=self.Xtil, y=self.y, w=w, verbose=False) for w in wmat_seq)
+        print('Took %0.1f seconds to run length scale tuning' % (time() - stime))
+        # Fit ridge regression to each
+        vec_r2 = np.zeros(len(ll_seq))
+        for ii, ll in enumerate(ll_seq):
+            supp = np.where(lst[ii][0] !=0)[0]
+            l2 = Ridge(alpha=0.01).fit(self.Xtil[:,supp], self.y, wmat_seq[ii])
+            vec_r2[ii] = r2_score(y,l2.predict(Xtil[:,supp]))
+        res = pd.DataFrame({'ll':ll_seq, 'r2':vec_r2})
         print('Optimal length-scale\n%s' % res.loc[res.r2.idxmax()])
         self.ll = res.loc[res.r2.idxmax()].ll
         # Add on the validation X, y and index to the model
