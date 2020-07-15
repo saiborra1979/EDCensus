@@ -1,12 +1,10 @@
-#!/bin/bash -x
 
-#PBS -l nodes=1:ppn=1
+#PBS -l nodes=1:ppn=10
 #PBS -l walltime=01:00:00
 #PBS -o /home/edrysdale/qsub/
 #PBS -e /home/edrysdale/qsub/
 #PBS -l vmem=16g
 #PBS -l mem=16g
-#PBS -t 0-181
 
 # Assign the lead
 lead=$(($1))
@@ -36,6 +34,6 @@ day=$(($PBS_ARRAYID))
 echo "--- day: "$day"------"
 
 # Call model
-python run_lasso.py --day $day --lead $lead --nlags 10
+python run_mdl.py --day $day --lead $lead --nlags 10 --model local
 
 echo "##### end of script: "$day" ######"
