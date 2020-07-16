@@ -1,5 +1,5 @@
+#!/bin/bash
 
-#PBS -l nodes=1:ppn=10
 #PBS -l walltime=01:00:00
 #PBS -o /home/edrysdale/qsub/
 #PBS -e /home/edrysdale/qsub/
@@ -8,7 +8,11 @@
 
 # Assign the lead
 lead=$(($1))
-echo "Lead: "$lead
+model=$2
+echo "Lead: "$lead", model: "$model
+
+# EXAMPLE OF HOW TO RUN
+#qsub -N local_lead4_lasso -F "4 lasso" -t 0-181 -l nodes=1:ppn=1 pipeline_HPF.sh
 
 pwd
 cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow
@@ -34,6 +38,6 @@ day=$(($PBS_ARRAYID))
 echo "--- day: "$day"------"
 
 # Call model
-python run_mdl.py --day $day --lead $lead --nlags 10 --model local
+python run_mdl.py --day $day --lead $lead --nlags 10 --model $model
 
 echo "##### end of script: "$day" ######"
