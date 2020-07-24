@@ -7,6 +7,7 @@ import pandas as pd
 from time import time
 from scipy.stats import norm
 from sklearn.metrics import r2_score
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import euclidean_distances
 from funs_support import cvec
 
@@ -25,29 +26,30 @@ yy = pd.Series(y1).append(pd.Series(y2)).append(pd.Series(y3))
 # Beta testing
 df = pd.concat([t1,t2,t3],0).assign(y=yy)
 ii = (df.index - df.reset_index().index)
-df.insert(0,'tt',np.where(ii == 0, 'train', np.where(ii == -500, 'valid', 'test')))
+df.insert(0,'tt',np.where(ii == 0, 'train', 'test'))
 df['hour'] = df.groupby('trend').cumcount()
 df = df.reset_index(None,True).reset_index()
+enc = StandardScaler().fit(cvec(df.y[df.tt=='train']))
+df['y'] = enc.transform(cvec(df.y)).flatten()
 
-# Try noise downward sinusodial
-np.random.seed(1234)
-df = df[['index','tt']].assign(y=np.sin(df.index/25) +
-                                 0.25*np.random.randn(df.shape[0]) +
-                                 np.linspace(0,-1,df.shape[0]),
-                               tt=lambda x: np.where(x.tt != 'train','test','train'))
+# # Try noise downward sinusodial
+# np.random.seed(1234)
+# df = df[['index','tt']].assign(y=np.sin(df.index/25) +
+#                                  0.25*np.random.randn(df.shape[0]) +
+#                                  np.linspace(0,-1,df.shape[0]),
+#                                tt=lambda x: np.where(x.tt != 'train','test','train'))
+
 # Set up the GP kenrel
 gp_kernel = ExpSineSquared(length_scale=1, periodicity=25)
-#                length_scale_bounds=(1e-2, 10), periodicity_bounds = (1e-2,24))
 gp_kernel += WhiteKernel(noise_level=15)
 gp_kernel += 1**2*RBF(length_scale=1)
-gpr = GaussianProcessRegressor(kernel=gp_kernel, normalize_y=True, n_restarts_optimizer=10, random_state=1234)
+gpr = GaussianProcessRegressor(kernel=gp_kernel, normalize_y=True, n_restarts_optimizer=3, random_state=1234)
 gpr.fit(X=cvec(df[df.tt=='train'].index),y=df[df.tt=='train'].y)
+gpr.kernel_.k1.k2.noise_level = 1
 # Look at the new kernel estimates
 print(gpr.kernel_)
-mu, se = gpr.predict(cvec(df.index),True)
-# fig = sns.distplot(gpr.sample_y(cvec(df.index[0]),n_samples=1000))
-# fig.figure.savefig(os.path.join(dir_figures, 'tmp1.png'))
 
+mu, se = gpr.predict(cvec(df.index),True)
 
 crit = norm.ppf(0.975)
 dat = df.assign(yhat = mu, se=se, lb=mu-crit*se, ub=mu+crit*se)

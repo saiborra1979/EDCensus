@@ -34,6 +34,10 @@ dir_flow = os.path.join(dir_output, 'flow')
 
 idx = pd.IndexSlice
 
+def date2ymdh(x):
+    year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
+    return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
+
 ######################################
 # --- STEP 1: LOAD CLINICAL DATA --- #
 
@@ -113,6 +117,7 @@ dat_labs = pd.concat(holder).reset_index(None, True)
 del holder, tmp
 dat_labs['order_time'] = pd.to_datetime(dat_labs.date + ' ' + dat_labs.time,format='%d/%m/%Y %I:%M:%S %p')
 dat_labs.drop(columns=['date','time'],inplace=True)
+labs = dat_labs.copy()
 pd.DataFrame({'lab':dat_labs.name.unique()}).to_csv(os.path.join(dir_output,'u_labs.csv'))
 # Ensure all days are found
 udt = [first_day] + list(dat_labs.order_time.dt.strftime(fmt).unique())
@@ -143,6 +148,7 @@ pd.DataFrame({'lab':dat_DI.name.unique()}).to_csv(os.path.join(dir_output,'u_DI.
 del holder, tmp
 dat_DI['order_time'] = pd.to_datetime(dat_DI.date + ' ' + dat_DI.time,format='%d/%m/%Y %I:%M:%S %p')
 dat_DI.drop(columns=['date','time'],inplace=True)
+DI = dat_DI.copy()
 # Ensure all days are found
 udt = [first_day] + list(dat_DI.order_time.dt.strftime(fmt).unique())
 assert dt_range.isin(udt).all()
@@ -298,6 +304,14 @@ holder_u_mds = pd.DataFrame(holder,columns=['u_mds10h']).reset_index().assign(ye
 # (v) Merge labs/DI with exiting hour range
 dat_labs_flow = hourly_tt[cn_date].merge(dat_labs_flow, 'left', cn_date).fillna(method='ffill').fillna(method='bfill').astype(int)
 dat_DI_flow = hourly_tt[cn_date].merge(dat_DI_flow, 'left', cn_date).fillna(method='ffill').fillna(method='bfill').astype(int)
+
+# (vi) Full DI/raw labs for Hillary
+q1 = date2ymdh(DI.order_time).assign(name=DI.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
+q1 = hourly_census.drop(columns=['census_var']).merge(q1,'left',cn_date).fillna(0).astype(int)
+q1.to_csv(os.path.join(dir_flow, 'all_DI.csv'),index=True)
+q2 = date2ymdh(labs.order_time).assign(name=labs.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
+q2 = hourly_census.drop(columns=['census_var']).merge(q2,'left',cn_date).fillna(0).astype(int)
+q2.to_csv(os.path.join(dir_flow, 'all_labs.csv'),index=True)
 
 ########################################
 # --- STEP 7: MERGE ALL DATA TYPES --- #
