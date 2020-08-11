@@ -4,6 +4,43 @@ import pandas as pd
 import itertools
 from math import radians, cos, sin, asin, sqrt
 
+from sklearn.preprocessing import StandardScaler
+
+def date2ymd(x):
+    assert isinstance(x, pd.Series)
+    dat = pd.DataFrame({'year':x.dt.strftime('%Y').astype(int),
+                          'month':x.dt.strftime('%m').astype(int),
+                          'day':x.dt.strftime('%d').astype(int)})
+    return dat
+
+class normalizer():
+    def __init__(self):
+        self.enc = StandardScaler(copy=True)
+    def fit(self, x):
+        ls = len(x.shape)
+        assert ls <= 2
+        if ls == 2:
+            self.enc.fit(x)
+        else:
+            self.enc.fit(cvec(x))
+    def transform(self, x):
+        ls = len(x.shape)
+        assert ls <= 2
+        if ls == 2:
+            return self.enc.transform(x)
+        else:
+            return self.enc.transform(cvec(x)).flatten()
+
+    def inverse_transform(self, x):
+        ls = len(x.shape)
+        assert ls <= 2
+        if ls == 2:
+            return self.enc.inverse_transform(x)
+        else:
+            return self.enc.inverse_transform(cvec(x)).flatten()
+
+def t2n(x):
+    return x.detach().numpy()
 
 def cvec(x):
     return np.atleast_2d(x).T

@@ -17,7 +17,7 @@ print(args)
 nlags, lead, day, model = args.nlags, args.lead, args.day, args.model
 
 # # Debugging in PyCharm
-# nlags, lead, day, model = 1, 4, 76, 'local'
+# nlags, lead, day, model = 1, 4, 76, 'torch_gpy'
 
 import os
 import numpy as np
