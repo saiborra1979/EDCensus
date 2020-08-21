@@ -73,7 +73,7 @@ res_gp.dates = pd.to_datetime(res_gp.dates.astype(str) + ' ' + res_gp.hour.astyp
 print('UB viol: %.3f, LB voil: %.3f' % (np.mean(res_gp.y > res_gp.ub), np.mean(res_gp.y < res_gp.lb)))
 
 assert np.all(res_gp.groupby(['lead','dates']).size() == 1)
-res_gp_long = res_gp.melt(['lead','dates','y'],['pred','lb','ub'],'metric')
+res_gp_long = res_gp.melt(['lead','dates','y'],['pred','lb','ub'],'measure')
 
 # Group the upper/lower bound violations by quntile
 y_quints = np.quantile(res_gp.y,np.arange(0,1.01,0.1))
@@ -102,17 +102,19 @@ dat_months_long = pd.concat([dat_months_long, tmp],1)
 ################################
 # --- STEP 4: PLOT RESULTS --- #
 
-di_metric = {'pred':'Mean','lb':'Lower-bound','ub':'Upper-bound'}
+di_measure = {'pred':'Mean','lb':'Lower-bound','ub':'Upper-bound'}
 
+### SCATTERPLOT OF PREDICTED VS ACTUAL AND LB/UB ###
 gg_viol = (ggplot(res_gp_long, aes(x='value',y='y')) + theme_bw() +
            geom_point(size=0.5, alpha=0.5) +
            geom_abline(intercept=0,slope=1,color='blue') +
            labs(x='Predicted',y='Actual') +
-           facet_grid('lead~metric',labeller=labeller(metric=di_metric,lead=label_both),scales='free') +
+           facet_grid('lead~measure',labeller=labeller(measure=di_measure,lead=label_both),scales='free') +
            theme(panel_spacing_x=0.25) +
            ggtitle('Upper/lower-bound violations for Gaussian Process'))
-gg_viol.save(os.path.join(dir_figures, 'gg_viol.png'), height=8, width=12)
+gg_viol.save(os.path.join(dir_figures, 'gg_viol_scatter.png'), height=8, width=12)
 
+### VIOLATION PERCENTAGE BY LEVEL OF RESPONSE ###
 posd = position_dodge(1)
 gg_quint = (ggplot(dat_viol_long, aes(x='qq',y='value',fill='bound')) + theme_bw() +
             # geom_bar(stat='identity',position=pd,color='black') +
@@ -120,31 +122,39 @@ gg_quint = (ggplot(dat_viol_long, aes(x='qq',y='value',fill='bound')) + theme_bw
             facet_wrap('~lead',labeller=label_both) + guides(color=False) +
             geom_linerange(aes(x='qq',ymin='lb',ymax='ub',color='bound'),position=posd) +
             scale_fill_discrete(name='Bound',labels=['Lower-bound','Upper-bound']) +
-            theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90)) +
-            labs(y='Violation rate') + geom_hline(yintercept=0.025) +
-            ggtitle('GP 95% prediction interval violation'))
-gg_quint.save(os.path.join(dir_figures, 'gg_quint.png'), height=5, width=8)
+            theme(axis_text_x=element_text(angle=90)) +
+            labs(y='Violation rate',x='Max number of hourly patients') +
+            geom_hline(yintercept=0.025) +
+            ggtitle('GP violation rate by outcome level\n95% Prediction Interval'))
+gg_quint.save(os.path.join(dir_figures, 'gg_viol_quint.png'), height=5.5, width=8)
 
+### VIOLATION PERCENTAGE BY 2020 MONTH ###
 gg_months = (ggplot(dat_months_long, aes(x='month.astype(str)',y='value',fill='bound')) +
             theme_bw() + geom_point(position=posd,size=3) +
             facet_wrap('~lead',labeller=label_both) + guides(color=False) +
             geom_linerange(aes(x='month.astype(str)',ymin='lb',ymax='ub',color='bound'),position=posd) +
             scale_fill_discrete(name='Bound',labels=['Lower-bound','Upper-bound']) +
-            labs(y='Violation rate', x='Month') + geom_hline(yintercept=0.025) +
-            ggtitle('GP 95% prediction interval violation'))
-gg_months.save(os.path.join(dir_figures, 'gg_months.png'), height=5, width=8)
+            labs(y='Violation rate', x='Month (2020)') + geom_hline(yintercept=0.025) +
+            ggtitle('GP violation rate by outcome month (2020)\n95% Prediction Interval'))
+gg_months.save(os.path.join(dir_figures, 'gg_viol_month.png'), height=5, width=8)
 
 
-gg_r2 = (ggplot(r2_mdl[r2_mdl.model!='Lasso'], aes(x='date',y='value',color='model')) +
-         geom_point(size=0.1, alpha=0.5) + geom_line(alpha=0.5) +
-         theme_bw() + labs(y='Value') +
-         theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90)) +
-         ggtitle('One-day-ahead performance by lead') +
-         facet_grid('metric~lead',labeller=label_both,scales='free_y') +
-         scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
-         geom_line(aes(x='date',y='smooth',color='model')))
-gg_r2.save(os.path.join(dir_figures, 'gg_r2.png'), height=9, width=10)
+### LEAD PERFORMANCE ###
+di_metric = {'r2':'R-squared', 'conc':'Concordance', 'rmse':'RMSE'}
 
+for metric in di_metric:
+    print(metric)
+    tmp = r2_mdl[(r2_mdl.metric==metric)]
+    fn, lbl = 'gg_perf_' + metric + '.png', di_metric[metric]
+    title = 'Performance by model: ' + lbl + '\nOne-day-ahead predictions'
+    gg_tmp = (ggplot(tmp, aes(x='date',y='value',color='model')) +
+                 geom_point(size=0.1, alpha=0.5) + geom_line(alpha=0.5) +
+                 theme_bw() + labs(y=lbl) + scale_color_discrete(name='Model') +
+                 theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90)) +
+                 ggtitle(title) + facet_wrap('lead',labeller=label_both,scales='free_y') +
+                 scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
+                 geom_line(aes(x='date',y='smooth',color='model')))
+    gg_tmp.save(os.path.join(dir_figures, fn), height=5, width=8)
 
 
 

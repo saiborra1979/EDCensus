@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
 
-from mdls.torch_gpy import mdl
+from mdls.gpy import mdl
 
 dir_base = os.getcwd()
 dir_figures = os.path.join(dir_base, '..', 'figures')
