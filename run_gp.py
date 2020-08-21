@@ -1,6 +1,13 @@
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--lead', type=int, default=1, help='Which lead of the data to predict?')
+parser.add_argument('--model', type=str, default='gpy', help='Which GP to use?')
+args = parser.parse_args()
+print(args)
+lead, model = args.lead, args.model
 
-# Debugging in PyCharm
-lead, model = 5, 'gpy'
+# # Debugging in PyCharm
+# lead, model = 5, 'gpy'
 
 import os
 import numpy as np
@@ -97,5 +104,3 @@ fn_res = gp.fn.replace('.pkl','.csv').replace('mdl_','res_')
 df_res = pd.concat(holder).reset_index(None,True).rename(columns={'mu':'pred'})
 df_res = df_res.assign(lead=lead, model=model)
 df_res.to_csv(os.path.join(dir_test, fn_res), index=True)
-
-
