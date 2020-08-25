@@ -40,13 +40,16 @@ for model in models:
         res.dates = pd.to_datetime(res.dates + ' ' + res.hour.astype(str)+':00:00')
         res = pd.concat([res, date2ymd(res.dates)], 1)
     holder.append(res)
+    path = os.path.join(dir_flow,'res_'+model+'.csv')
+    res.to_csv(path,index=False)
     print(res.columns)
 
 res_model = pd.concat(holder).reset_index(None,True)
 print(res_model.isnull().sum(0))
 
 print(res_model.groupby(['model','lead','year','month','day']).apply(lambda x: r2(x.y, x.pred)))
-res_model.to_csv(os.path.join(dir_flow, 'res_model.csv'))
+res_model.to_csv(os.path.join(dir_flow, 'res_model.csv'),index=False)
+
 
 # # Get coefficients
 # holder = []

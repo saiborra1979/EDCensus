@@ -9,6 +9,8 @@ from plotnine import *
 from sklearn.metrics import r2_score as r2
 from sklearn.metrics import mean_squared_error as mse
 from funs_support import cindex, smoother, date2ymd, cvec
+from statsmodels.stats.proportion import proportion_confint as propCI
+
 
 dir_base = os.getcwd()
 dir_figures = os.path.join(dir_base, '..', 'figures')
@@ -65,8 +67,6 @@ r2_mdl = r2_mdl.assign(model=lambda x: x.model.map(di_mdl))
 
 ##############################
 # --- STEP 3: GP RESULTS --- #
-
-from statsmodels.stats.proportion import proportion_confint as propCI
 
 res_gp = res_gp.sort_values(['lead','year','month','day']).reset_index(None,True)
 res_gp.dates = pd.to_datetime(res_gp.dates.astype(str) + ' ' + res_gp.hour.astype(str)+':00:00')
