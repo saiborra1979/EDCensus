@@ -2,19 +2,22 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--lead', type=int, default=1, help='Which lead of the data to predict?')
 parser.add_argument('--model', type=str, default='gpy', help='Which GP to use?')
+parser.add_argument('--dstart', type=int, default=0, help='Day to start in 2020 (0==Jan 1)')
+parser.add_argument('--dend', type=int, default=366, help='Day to end in 2020 (366==Dec 31)')
 args = parser.parse_args()
 print(args)
-lead, model = args.lead, args.model
+lead, model, dstart, dend = args.lead, args.model, args.dstart, args.dend
 
 # # Debugging in PyCharm
-# lead, model = 5, 'gpy'
+# lead, model, dstart, dend = 5, 'gpy', 180, 212
 
 import os
+import sys
 import numpy as np
 import pandas as pd
-from sklearn.metrics import r2_score
-
+from time import time
 from mdls.gpy import mdl
+# from sklearn.metrics import r2_score
 
 dir_base = os.getcwd()
 dir_figures = os.path.join(dir_base, '..', 'figures')
@@ -48,9 +51,20 @@ Xmat = np.hstack([tmat.values, Xmat])
 # --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #
 print('# --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #')
 
-from time import time
+# Days of 2020
+d_range = pd.date_range('2020-01-01','2020-12-31', freq='1d')
+d_pred = d_range[dstart:dend]
+# Subset if pred range is outside of date max
+dmax = pd.to_datetime((dates - pd.offsets.Day(1)).max().strftime('%Y-%m-%d'))
 
-d_pred = pd.date_range('2020-01-01', dates.max(), freq='1d')
+if d_pred.min() > dmax:
+    sys.exit('Smallest date range is exceeds largest dates in df_lead_lags')
+if d_pred.max() > dmax:
+    print('d_pred has dates greater than dmax, subsetting')
+    d_pred = d_pred[d_pred <= dmax]
+
+print('Range that will be predicted:\n%s\n' % ', '.join(d_pred.astype(str)))
+
 # d_test = d_pred[day]
 
 # Initialize model
@@ -59,7 +73,8 @@ gp = mdl(model=model, lead=lead, cn=cn)
 holder = []
 for day, d_test in enumerate(d_pred):
     # day = 78; d_test = d_pred[day]
-    print('Predicting %i hours ahead for testing day: %s\nDay %i of %i' % (lead, d_test, day+1, len(d_pred)))
+    print('Predicting %i hours ahead for testing day: %s\nIteration %i of %i' %
+          (lead, d_test, day+1, len(d_pred)))
     assert day+1 <= len(d_pred)
     # Using previous week for validation data
     d_valid = d_test - pd.DateOffset(weeks=1)
@@ -100,7 +115,8 @@ for day, d_test in enumerate(d_pred):
 ####################################
 # --- STEP 3: SAVE PREDICTIONS --- #
 
-fn_res = gp.fn.replace('.pkl','.csv').replace('mdl_','res_')
+fn_res = gp.fn.replace('mdl_','res_').replace('.pkl','_'+str(dstart)+'_'+str(dend)+'.csv')
 df_res = pd.concat(holder).reset_index(None,True).rename(columns={'mu':'pred'})
 df_res = df_res.assign(lead=lead, model=model)
+
 df_res.to_csv(os.path.join(dir_test, fn_res), index=True)

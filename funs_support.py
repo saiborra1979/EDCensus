@@ -13,6 +13,12 @@ def date2ymd(x):
                           'day':x.dt.strftime('%d').astype(int)})
     return dat
 
+def date2ymdh(x):
+    assert isinstance(x, pd.Series)
+    year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
+    return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
+
+
 class normalizer():
     def __init__(self):
         self.enc = StandardScaler(copy=True)

@@ -28,8 +28,11 @@ echo "(3) Get descriptive statistics"
 echo "(4) Run Gaussian Process in Parallel"
 for ll in {1..7..1}; do
   echo "Lead: "$ll
-  python -u run_gp.py --lead $ll --model gpy > "../lead"$ll".log" &
+#  python -u run_gp.py --lead $ll --model gpy > "../lead"$ll".log" &
 done
+
+echo "(5) Compare performance to escalation"
+python run_escalation.py
 
 #echo "(4) Fit Lasso model over various days"
 #if [ $loc != "mnt" ]; then

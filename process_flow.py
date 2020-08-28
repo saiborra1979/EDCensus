@@ -12,15 +12,15 @@ args = parser.parse_args()
 print(args)
 bfreq, ylbl, nlags = args.bfreq, args.ylbl, args.nlags
 
-# Debugging in PyCharm
-bfreq = '1 hour'; ylbl = 'census_max'; nlags = 10
+# # Debugging in PyCharm
+# bfreq = '1 hour'; ylbl = 'census_max'; nlags = 10
 
 
 # Load in the required modules
 import os
 import numpy as np
 import pandas as pd
-from funs_support import add_lags, ljoin
+from funs_support import add_lags, ljoin, date2ymd, date2ymdh
 
 dir_base = os.getcwd()
 dir_data = os.path.join(dir_base, '..', 'data')
@@ -33,10 +33,6 @@ dir_output = os.path.join(dir_base, '..', 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 
 idx = pd.IndexSlice
-
-def date2ymdh(x):
-    year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
-    return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
 
 ######################################
 # --- STEP 1: LOAD CLINICAL DATA --- #
@@ -66,13 +62,15 @@ idx_drop = ~dat_clin[cn_nodrop].isnull().any(axis=1)
 print('A total of %i rows had to be dropped (no arrived or LOS field)' % sum(~idx_drop))
 dat_clin = dat_clin[idx_drop].reset_index(None, True)
 
-# Ensure all days are found
+# Ensure all days are found (note we substract 1 minute off incase someone comes in at midnight)
 fmt = '%Y-%m-%d'
 first_day = '2018-06-01'
-dt_min, dt_max = dat_clin.arrived.min().strftime(fmt), dat_clin.arrived.max().strftime(fmt)
+dt_min = dat_clin.arrived.min().strftime(fmt)
+dt_max = (dat_clin.arrived.max()-pd.DateOffset(minutes=1)).strftime(fmt)
 dt_range = pd.date_range(dt_min, dt_max,freq='d').astype(str)
-udt = [first_day] + list(dat_clin.arrived.dt.strftime(fmt).unique())
+udt = [first_day] + list((dat_clin.arrived-pd.DateOffset(minutes=1)).dt.strftime(fmt).unique())
 assert dt_range.isin(udt).all()
+print('First day: %s, last day: %s' % (dt_min, dt_max))
 
 # Time to PIA
 dat_clin['time2pia'] = dat_clin.time2pia.str.split('\\:', expand=True).astype(float).apply(
@@ -120,9 +118,9 @@ dat_labs.drop(columns=['date','time'],inplace=True)
 labs = dat_labs.copy()
 pd.DataFrame({'lab':dat_labs.name.unique()}).to_csv(os.path.join(dir_output,'u_labs.csv'))
 # Ensure all days are found
-udt = [first_day] + list(dat_labs.order_time.dt.strftime(fmt).unique())
-assert dt_range.isin(udt).all()
+udt = [first_day] + list((dat_labs.order_time-pd.DateOffset(minutes=1)).dt.strftime(fmt).unique())
 print(dt_range[~dt_range.isin(udt)])
+assert dt_range.isin(udt).all()
 # Fast parse
 dat_labs.name = dat_labs.name.str.split('\\s',1,True).iloc[:,0].str.lower()
 freq_labs = dat_labs.name.value_counts(True)
@@ -150,9 +148,9 @@ dat_DI['order_time'] = pd.to_datetime(dat_DI.date + ' ' + dat_DI.time,format='%d
 dat_DI.drop(columns=['date','time'],inplace=True)
 DI = dat_DI.copy()
 # Ensure all days are found
-udt = [first_day] + list(dat_DI.order_time.dt.strftime(fmt).unique())
-assert dt_range.isin(udt).all()
+udt = [first_day] + list((dat_DI.order_time-pd.DateOffset(minutes=1)).dt.strftime(fmt).unique())
 print(dt_range[~dt_range.isin(udt)])
+assert dt_range.isin(udt).all()
 # Fast parse
 u_DI = pd.Series(dat_DI.name.unique())
 u_DI = pd.DataFrame(u_DI.str.split('\\s',2,True).iloc[:,0:2]).rename(columns={0:'device',1:'organ'}).assign(term=u_DI)
@@ -182,11 +180,13 @@ dat_DI_wide.drop(columns=di_low,inplace=True)
 cn_date = ['year', 'month', 'day', 'hour']
 
 # Get year/month/day/hour
-dat_DI_flow = dat_DI_wide.assign(year=lambda x: x.order_time.dt.year, month=lambda x: x.order_time.dt.month, day=lambda x: x.order_time.dt.day, hour=lambda x: x.order_time.dt.hour).drop(columns=['order_time'])
-dat_labs_flow = dat_labs_wide.assign(year=lambda x: x.order_time.dt.year, month=lambda x: x.order_time.dt.month, day=lambda x: x.order_time.dt.day, hour=lambda x: x.order_time.dt.hour).drop(columns=['order_time'])
+dat_DI_flow = pd.concat([dat_DI_wide, date2ymdh(dat_DI_wide.order_time)],1).drop(columns=['order_time'])
+dat_labs_flow = pd.concat([dat_labs_wide, date2ymdh(dat_labs_wide.order_time)],1).drop(columns=['order_time'])
 # Aggregate by hour
-dat_DI_flow = dat_DI_flow.groupby(cn_date)[dat_DI_wide.columns.drop('order_time')].sum().reset_index()
-dat_labs_flow = dat_labs_flow.groupby(cn_date)[dat_labs_wide.columns.drop('order_time')].sum().reset_index()
+cn_DI = dat_DI_wide.columns.drop('order_time')
+cn_labs = dat_labs_wide.columns.drop('order_time')
+dat_DI_flow = dat_DI_flow.groupby(cn_date)[cn_DI].sum().reset_index()
+dat_labs_flow = dat_labs_flow.groupby(cn_date)[cn_labs].sum().reset_index()
 
 #######################################################
 # --- STEP 6: FLOW ON ARRIVAL AND DISCHARGE TIMES --- #
@@ -204,7 +204,7 @@ dat_long = dat_clin.melt(cn_idx, ['arrived', 'discharged'], 'tt', 'date').sort_v
 # Actual patient count
 dat_long.insert(0, 'census', dat_long.ticker.cumsum())
 # Hourly results
-dat_long = dat_long.assign(year=lambda x: x.date.dt.year, month=lambda x: x.date.dt.month, day=lambda x: x.date.dt.day, hour=lambda x: x.date.dt.hour)
+dat_long = pd.concat([dat_long, date2ymdh(dat_long.date)],1)
 num_days = dat_long.groupby(cn_date[:-1]).size().shape[0]
 print('There are %i total days in the dataset' % num_days)
 # Get the last day/hour
