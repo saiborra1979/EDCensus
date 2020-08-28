@@ -24,11 +24,10 @@ if [ -d $dir_pulls ]; then
     scp ../pulls.zip erik@snowqueen.sickkids.ca:/home/erik/Documents/projects/ED/master
     scp ../pulls.zip edrysdale@data.ccm.sickkids.ca:/hpf/largeprojects/agoldenb/edrysdale/ED
   fi
-  if [ $is_mnt == "erik" ]; then
-    unzip -o ../pulls.zip ../
-  fi
-  if [ $is_mnt == "edrysdale" ]; then
-    unzip -o ../pulls.zip ../
+  if [ $is_mnt == "erik" ] || [ $is_mnt == "edrysdale" ]; then
+    rm -r ../pulls
+    unzip -o ../pulls.zip -d ../
+    chmod 700 ../pulls*
   fi
 else
   echo "pulls folder does not exist!"
