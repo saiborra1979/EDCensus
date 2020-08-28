@@ -29,6 +29,6 @@ model="gpy"  # should line up with mdls/{}.py
 echo "Lead: "$lead", model: "$model
 
 # Call model: 212==July 30
-python -u run_gp.py --lead $ll --model gpy --dstart 0 --dend 212
+python -u run_gp.py --lead $lead --model gpy --dstart 0 --dend 212
 
 echo "##### end of script ######"

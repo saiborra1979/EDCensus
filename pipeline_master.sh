@@ -5,15 +5,22 @@ echo "THE STARTING DIRECTORY"
 pwd
 
 # If on HPF point to the python path
-loc=$(pwd | cut -d'/' -f2)
-if [ $loc != "mnt" ]; then
+loc=$(pwd | cut -d'/' -f3)
+
+if [ $loc == "c" ]; then
+  echo "we are on predator"
+  conda activate CensusFlow
+elif [ $loc == "erik" ]; then
+  echo "we are on snowqueen"
+  conda activate EDproject
+elif [ $loc == "largeprojects" ]; then
 	echo "WE ARE ON HPF"
 	cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow
 	. conda.env
 	source activate CensusFlow
 else
-	echo "WE ARE ON LOCAL"
-	conda activate CensusFlow
+  echo "where are we?!"
+  return
 fi
 
 echo "(1) Get the demographic data"
@@ -26,13 +33,13 @@ echo "(3) Get descriptive statistics"
 #python explore_AR.py
 
 echo "(4) Run Gaussian Process in Parallel"
-for ll in {1..7..1}; do
+for ll in {2..7..1}; do
   echo "Lead: "$ll
 #  python -u run_gp.py --lead $ll --model gpy > "../lead"$ll".log" &
 done
 
 echo "(5) Compare performance to escalation"
-python run_escalation.py
+#python run_escalation.py
 
 #echo "(4) Fit Lasso model over various days"
 #if [ $loc != "mnt" ]; then
