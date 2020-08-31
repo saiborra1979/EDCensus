@@ -8,13 +8,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--bfreq', type=str, default='1 hour', help='Time binning frequency')
 parser.add_argument('--ylbl', type=str, default='census_max', help='Target label')
 parser.add_argument('--nlags', type=int, default=10, help='Max number of lags')
+parser.add_argument('--nleads', type=int, default=25, help='Max number of leads')
 args = parser.parse_args()
 print(args)
-bfreq, ylbl, nlags = args.bfreq, args.ylbl, args.nlags
+bfreq, ylbl, nlags, nleads = args.bfreq, args.ylbl, args.nlags, args.nleads
 
 # # Debugging in PyCharm
-# bfreq = '1 hour'; ylbl = 'census_max'; nlags = 10
-
+# bfreq = '1 hour'; ylbl = 'census_max'; nlags = 10; nleads=25
 
 # Load in the required modules
 import os
@@ -328,10 +328,10 @@ cn_X = list(hourly_X.columns.drop(cn_date))
 hourly_X = pd.concat([add_lags(hourly_X[cn_X], ll) for ll in lags], 1).set_index(pd.MultiIndex.from_frame(hourly_X[cn_date])).iloc[nlags:-nlags]
 
 # y-labels
-leads = -(np.arange(nlags)+1)
+leads = -np.arange(nleads)
 hourly_Y = pd.DataFrame(np.vstack([hourly_census[ylbl].shift(z).values for z in leads]).T).set_index(pd.MultiIndex.from_frame(hourly_census[cn_date]))
 hourly_Y.columns = pd.MultiIndex.from_product([['y'],['lead_'+str(z) for z in np.abs(leads)]])
-hourly_Y = hourly_Y.iloc[nlags:-nlags].astype(int)
+hourly_Y = hourly_Y.iloc[nlags:-nleads].astype(int)
 
 # Merge data and save for later
 df_lead_lags = hourly_Y.join(hourly_X)
