@@ -8,8 +8,8 @@ args = parser.parse_args()
 print(args)
 lead, model, dstart, dend = args.lead, args.model, args.dstart, args.dend
 
-# # Debugging in PyCharm
-# lead, model, dstart, dend = 5, 'gpy', 180, 212
+# # Debugging in PyCharm (78==March 19th)
+# lead, model, dstart, dend = 4, 'gpy', 78, 79
 
 import os
 import sys

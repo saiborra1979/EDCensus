@@ -5,6 +5,7 @@ import itertools
 from math import radians, cos, sin, asin, sqrt
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
 
 def date2ymd(x):
     assert isinstance(x, pd.Series)
@@ -17,6 +18,16 @@ def date2ymdh(x):
     assert isinstance(x, pd.Series)
     year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
     return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
+
+def rho(x,y):
+    return pd.DataFrame({'x':x,'y':y}).corr().iloc[0,1]
+
+def r2_fun(y, x):
+    idx = ~(np.isnan(y) | np.isnan(x))
+    y, x = y[idx], x[idx]
+    mdl = LinearRegression().fit(X=cvec(x),y=y)
+    res = y - mdl.predict(cvec(x)).flatten()
+    return 1 - res.var() / y.var()
 
 
 class normalizer():
