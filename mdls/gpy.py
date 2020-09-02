@@ -6,9 +6,11 @@ import torch
 import gpytorch
 import os
 import pickle
-
 import numpy as np
 import pandas as pd
+from sklearn.metrics import r2_score
+from funs_support import t2n, normalizer
+from scipy.stats import norm
 
 from gpytorch.models import ExactGP
 from gpytorch.likelihoods import GaussianLikelihood
@@ -19,72 +21,121 @@ from gpytorch.kernels import LinearKernel, RBFKernel, CosineKernel
 # ,SpectralMixtureKernel, PeriodicKernel, ProductKernel, AdditiveKernel,
 from gpytorch.kernels import ScaleKernel
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score
 
-from funs_support import t2n, normalizer
-
-from scipy.stats import norm
-
-
+# Single slope: linear0
+# Temporal interaction with RBF: linear1
+# Similarity on hour: rfb0
+# Temporal interaction with time: rbf1
 class gp_real(ExactGP):
-    def __init__(self, train_x, train_y, likelihood):
+    def __init__(self, train_x, train_y, likelihood, cidx):
         super(gp_real, self).__init__(train_x, train_y, likelihood)
+        self.cidx = cidx
         self.mean = ConstantMean()
-        self.linear1 = LinearKernel()  # Single slope
-        self.linear2 = ScaleKernel(LinearKernel())  # Temporal interaction with RBF
-        self.rbf1 = RBFKernel()  # Similarity on hour (X)
-        self.rbf2 = ScaleKernel(RBFKernel())  # Temporal interaction with time
-        self.cosine1 = CosineKernel()
-        self.cosine2 = ScaleKernel(CosineKernel())
+        # trend have a linear+cosine, everything else gets RBF
+        self.cn = pd.Series(np.setdiff1d(self.cidx.cn.unique(),['trend']))
+        self.ngroups = len(self.cn)
+        self.pidx_trend = int(self.cidx[self.cidx.cn=='trend'].pidx.values[0])
+        # Number of linear kernels: 2 + ngroups
+        # Number of cosine kernels: 2
+        # Number of RBF kernels: 2*ngroups
+        self.kern1_linear_trend = LinearKernel()
+        self.kern1_cosine_trend = CosineKernel()
+        self.kern2_linear_trend = ScaleKernel(LinearKernel())
+        self.kern2_cosine_trend = ScaleKernel(CosineKernel())
+        for col in self.cn:
+            setattr(self, 'kern1_rbf_' + col, RBFKernel())
+            setattr(self, 'kern2_rbf_' + col, ScaleKernel(RBFKernel()))
+            setattr(self, 'kern2_linear_' + col, ScaleKernel(LinearKernel()))
 
     def forward(self, x):
         mean_x = self.mean(x)
         # Independent signals: trend, cyclical, RBF-freatures
-        covar_x1 = self.linear1(x[:, 0]) + self.cosine1(x[:, 0]) + self.rbf1(x[:, 1:])
-        # Interaction of cylical/features with trend
-        covar_x2 = self.linear2(x[:, 0])*self.rbf2(x[:, 1:]) + self.linear2(x[:, 0])*self.cosine2(x[:, 0])
+        covar_x1 = self.kern1_linear_trend(x[:, self.pidx_trend]) + \
+                   self.kern1_cosine_trend(x[:, self.pidx_trend])
+        # Interaction of cyclical/features with trend
+        covar_x2 = self.kern2_linear_trend(x[:, self.pidx_trend])*self.kern2_cosine_trend(x[:, self.pidx_trend])
+        for col in self.cn:
+            idx = self.cidx[self.cidx.cn==col].pidx.values
+            covar_x1 += getattr(self, 'kern1_rbf_' + col)(x[:, idx])
+            covar_x2 += getattr(self, 'kern2_rbf_' + col)(x[:, idx]) * getattr(self, 'kern2_linear_' + col)(x[:, self.pidx_trend])
         # Sum of independent, time-dependent, and interaction
         covar_x = covar_x1 + covar_x2 + (covar_x1 * covar_x2)
         out = MultivariateNormal(mean_x, covar_x)
         return out
 
 
-# self = mdl(model=model, lead=lead, date=d_test, cn=cn)
+# self = mdl(model=model, lead=lead, cn=cn, device=device, groups = ['CTAS'])
 # self.fit(X=Xmat_tval, y=y_tval, ntrain=1080, nval=168)
-# print(self.gp.train_inputs[0].var(0))
+# self.tune(max_iter=250, lr=0.01)
+# print(pd.Series([name for name, val in self.gp.named_parameters()]))
+# qq=self.gp.forward(self.gp.train_inputs[0])
+
 class mdl():
-    def __init__(self, model, lead, cn):  #, date
+    def __init__(self, model, lead, cn, device, groups=None):  #, date
         self.encX, self.encY = normalizer(), normalizer()
         self.isfit, self.istrained = False, False
-        self.model, self.lead, self.cn = model, lead, cn  #self.date,
+        self.model, self.lead, self.cn, self.device = model, lead, pd.Series(cn), device
         # Construct the unique filename
         self.fn = 'mdl_' + self.model + '_lead_' + str(self.lead) + '.pkl'  # + '_' + self.date.strftime('%Y_%m_%d')
+        # Group the different column types:
+        idx_trend = np.where(self.cn == 'date_trend')[0]  # (1) Continuous trend
+        idx_date = np.setdiff1d(np.where(self.cn.str.contains('date_'))[0],idx_trend)  # (2) Other datetime
+        idx_flow = np.where(self.cn.str.contains('census_|tt_'))[0]
+        idx_mds = np.where(self.cn.str.contains('avgmd|u_mds'))[0]
+        idx_health = np.where(self.cn.str.contains('diastolic_|num_meds_|systolic_|pulse_|resp_|temp_'))[0]
+        idx_demo = np.where(self.cn.str.contains('age_|ret72_|weight_|sex_|DistSK_'))[0]
+        idx_lang = np.where(self.cn.str.contains('language_'))[0]
+        idx_CTAS = np.where(self.cn.str.contains('CTAS_'))[0]
+        idx_arr = np.where(self.cn.str.contains('arr_method'))[0]
+        idx_labs = np.where(self.cn.str.contains('labs_'))[0]
+        idx_DI = np.where(self.cn.str.contains('DI_'))[0]
+        self.di_cn = {'trend':idx_trend, 'date':idx_date, 'flow':idx_flow,
+                 'mds':idx_mds, 'health':idx_health, 'demo':idx_demo,
+                 'language':idx_lang, 'CTAS':idx_CTAS, 'arr':idx_arr,
+                 'labs':idx_labs, 'DI':idx_DI}
+        assert len(np.setdiff1d(range(len(self.cn)), np.concatenate(list(self.di_cn.values())))) == 0
+        bl_groups = ['trend', 'date', 'flow']
+        if groups is None:
+            self.groups = bl_groups
+        else:
+            assert isinstance(groups, list)
+            assert all([ll in self.di_cn for ll in groups])
+            self.groups = groups + bl_groups
+        # Subset to valid groups
+        self.di_cn = {z: k for z,k in self.di_cn.items() if z in self.groups}
+        self.cidx = np.concatenate(list(self.di_cn.values()))
+        self.cidx = pd.concat([pd.DataFrame({'cn':k,'idx':v}) for k,v in self.di_cn.items()])
+        self.cidx.reset_index(None,True).rename_axis('pidx').reset_index()
+        self.cidx = self.cidx.reset_index(None,True).rename_axis('pidx').reset_index()
 
     # ntrain, nval, X, y, max_iter = 1080, 168, Xmat_tval.copy(), y_tval.copy(), 1000
     def fit(self, X, y, ntrain=1080, nval=168):
         self.ntrain, self.nval = ntrain, nval
         ntot = ntrain + nval
-        Xtil, ytil = X[-ntot:], y[-ntot:]
+        Xtil, ytil = X[-ntot:,self.cidx.idx], y[-ntot:]
         self.encX.fit(Xtil)
         self.encY.fit(ytil)  # Learn scaling
-        Xtil, ytil = torch.tensor(self.encX.transform(Xtil)), torch.tensor(self.encY.transform(ytil))
+        Xtil = torch.tensor(self.encX.transform(Xtil)).to(self.device)
+        ytil = torch.tensor(self.encY.transform(ytil)).to(self.device)
         # Train model
-        torch.manual_seed(1234)  # Seed because gptorch is non-determinsit in matrix inversion
+        torch.manual_seed(1234)  # Seed because gpytorch is non-determinsit in matrix inversion
         self.likelihood = GaussianLikelihood()
-        self.gp = gp_real(train_x=Xtil, train_y=ytil, likelihood=self.likelihood)
+        self.gp = gp_real(train_x=Xtil, train_y=ytil, likelihood=self.likelihood, cidx=self.cidx)
+        self.gp.to(self.device)
         self.isfit = True
 
     def set_Xy(self, X, y):
-        Xtil, ytil = torch.tensor(self.encX.transform(X)), torch.tensor(self.encY.transform(y))
+        Xtil = torch.tensor(self.encX.transform(X)).to(self.device)
+        ytil = torch.tensor(self.encY.transform(y)).to(self.device)
         self.gp.set_train_data(inputs=Xtil, targets=ytil, strict=False)
 
-    def tune(self, max_iter=100):
-        optimizer = torch.optim.Adam(params=self.gp.parameters(), lr=0.01)
+    # lr=0.01; max_iter=100
+    def tune(self, max_iter=250, lr=0.01, get_train=False):
+        optimizer = torch.optim.Adam(params=self.gp.parameters(), lr=lr)
         mll = ExactMarginalLogLikelihood(self.likelihood, self.gp)
         self.gp.train()
         self.likelihood.train()  # Set model to training mode
-        self.gp.double()
+        self.gp.float()
         ldiff, lprev, tol = 1, 100, 1e-3
         i = 0
         while (ldiff > tol) & (i < max_iter):
@@ -99,26 +150,30 @@ class mdl():
                 lprev = loss.item()
                 print('Iter %d/%d - Loss: %.3f, ldiff: %.4f' % (i + 1, max_iter, ll, ldiff))
             optimizer.step()
+            torch.cuda.empty_cache()
         print('\n'.join([f"{name}: {param.item():0.3f}" for name, param in self.gp.named_parameters()]))
         # Get internal fit
         self.gp.eval()
         self.likelihood.eval()
-        with torch.no_grad():
-            pred = self.likelihood(self.gp(self.gp.train_inputs[0]))
-        crit, cn = norm.ppf(0.975), ['mu','y','lb','ub']
-        self.res_train = pd.DataFrame({'mu': t2n(pred.mean), 'se': t2n(pred.stddev),'y':t2n(self.gp.train_targets)}).rename_axis(
-            'idx').reset_index().assign(tt=lambda x: np.where(x.idx < self.ntrain, 'train', 'valid'))
-        self.res_train = self.res_train.assign(lb=lambda x: x.mu - crit * x.se, ub=lambda x: x.mu + crit * x.se)
-        self.res_train[cn] = self.encY.inverse_transform(self.res_train[cn])
-        print(self.res_train.groupby('tt').apply(lambda x: pd.Series({'r2': r2_score(x.y, x.mu)})))
         self.istrained = True
+
+        if get_train:
+            with torch.no_grad():
+                pred = self.gp(self.gp.train_inputs[0])
+            crit, cn = norm.ppf(0.975), ['mu','y','lb','ub']
+            self.res_train = pd.DataFrame({'mu': t2n(pred.mean), 'se': t2n(pred.stddev),'y':t2n(self.gp.train_targets)}).rename_axis(
+                'idx').reset_index().assign(tt=lambda x: np.where(x.idx < self.ntrain, 'train', 'valid'))
+            self.res_train = self.res_train.assign(lb=lambda x: x.mu - crit * x.se, ub=lambda x: x.mu + crit * x.se)
+            self.res_train[cn] = self.encY.inverse_transform(self.res_train[cn])
+            print(self.res_train.groupby('tt').apply(lambda x: pd.Series({'r2': r2_score(x.y, x.mu)})))
+
 
     # X, y = Xmat_test.copy(), y_test
     def predict(self, X, y=None):
         assert self.isfit & self.istrained
-        Xtil = torch.tensor(self.encX.transform(X))
+        Xtil = torch.tensor(self.encX.transform(X[:,self.cidx.idx.values]),dtype=torch.float32).to(self.device)
         if y is not None:
-            ytil = torch.tensor(self.encY.transform(y))
+            ytil = torch.tensor(self.encY.transform(y),dtype=torch.float32).to(self.device)
         ntest = Xtil.shape[0]
         crit, cn = norm.ppf(0.975), ['mu','lb','ub']
         self.gp.eval()
@@ -127,7 +182,7 @@ class mdl():
         for i in range(ntest):
             xslice = Xtil[[i]]
             with torch.no_grad():
-                pred = self.likelihood(self.gp(xslice))
+                pred = self.gp(xslice)  #self.likelihood()
             res[i] = [pred.mean.item(), pred.stddev.item()]
             # Append on test set
             if y is not None:

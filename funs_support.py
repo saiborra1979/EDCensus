@@ -1,4 +1,5 @@
 import re
+import os
 import numpy as np
 import pandas as pd
 import itertools
@@ -6,6 +7,12 @@ from math import radians, cos, sin, asin, sqrt
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
+
+
+def makeifnot(path):
+    if not os.path.exists(path):
+        print('making folder')
+        os.mkdir(path)
 
 def date2ymd(x):
     assert isinstance(x, pd.Series)
@@ -57,7 +64,7 @@ class normalizer():
             return self.enc.inverse_transform(cvec(x)).flatten()
 
 def t2n(x):
-    return x.detach().numpy()
+    return x.cpu().detach().numpy()
 
 def cvec(x):
     return np.atleast_2d(x).T
