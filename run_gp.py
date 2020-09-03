@@ -19,7 +19,7 @@ if hasattr(args, 'groups'):
     groups = args.groups
 
 # # Debugging in PyCharm (78==March 19th)
-# lead, model, dstart, dend, groups, dtrain, dval = 4, 'gpy', 78, 79, ['CTAS','mds'], 125, 7
+# lead, model, dstart, dend, groups, dtrain, dval = 4, 'gpy', 60, 61, ['CTAS'], 125, 7
 
 import os
 import sys
@@ -30,6 +30,7 @@ from mdls.gpy import mdl
 import torch
 from datetime import datetime
 from funs_support import makeifnot
+import gpytorch
 
 # from sklearn.metrics import r2_score
 
@@ -47,6 +48,8 @@ use_cuda = torch.cuda.is_available()
 sdev = "cuda" if use_cuda else "cpu"
 print('Using device: %s' % sdev)
 device = torch.device(sdev)
+
+gpytorch.settings.max_cg_iterations(200)
 
 ####################################
 # --- STEP 1: LOAD/CREATE DATA --- #
@@ -115,7 +118,7 @@ for day, s_test in enumerate(d_pred):
     print('Training size: %i, validation size: %i, test size: %i' % (ntrain, nval, ntest))
     # Combine train/validation
     Xmat_tval, y_tval = np.vstack([Xmat_train, Xmat_valid]), np.append(y_train, y_valid)
-    gp.fit(X=Xmat_tval, y=y_tval, ntrain=3000, nval=168)
+    gp.fit(X=Xmat_tval, y=y_tval, ntrain=ntrain, nval=nval)
     if ii > 1:
         # Load state dict from previous iteration
         gp.gp.load_state_dict(holder_state)
@@ -127,6 +130,7 @@ for day, s_test in enumerate(d_pred):
     res = res.assign(date=s_test).rename_axis('hour').reset_index()
     holder.append(res)
     print('Model took %i seconds to tune and predict' % (time() - stime))
+    print(res)
     # # Day forecast
     # tmp = pd.concat([gp.res_train.drop(columns=['se','idx']), res.assign(tt='test').drop(columns=['hour','date'])])
     # tmp = tmp.reset_index(None, True).rename_axis('idx').reset_index()

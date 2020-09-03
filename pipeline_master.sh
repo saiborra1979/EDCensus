@@ -35,7 +35,7 @@ echo "(3) Get descriptive statistics"
 echo "(4) Run Gaussian Process in Parallel"
 for ll in {1..24..1}; do
   echo "Lead: "$ll
-  python -u run_gp.py --lead $ll --model gpy --dtrain 125 --dval 7 --dstart 0 --dend 243 --groups CTAS
+  python -u run_gp.py --lead $ll --model gpy --dtrain 125 --dval 7 --dstart 0 --dend 243
 #   > "../lead"$ll".log" &
 done
 
