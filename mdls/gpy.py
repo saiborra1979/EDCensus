@@ -65,7 +65,7 @@ class gp_real(ExactGP):
 
 
 # self = mdl(model=model, lead=lead, cn=cn, device=device, groups = ['CTAS'])
-# self.fit(X=Xmat_tval, y=y_tval, ntrain=1080, nval=168)
+# self.fit(X=Xmat_tval, y=y_tval, ntrain=ntrain, nval=nval)
 # self.tune(max_iter=250, lr=0.01)
 # print(pd.Series([name for name, val in self.gp.named_parameters()]))
 # qq=self.gp.forward(self.gp.train_inputs[0])
@@ -129,7 +129,7 @@ class mdl():
         ytil = torch.tensor(self.encY.transform(y)).to(self.device)
         self.gp.set_train_data(inputs=Xtil, targets=ytil, strict=False)
 
-    # lr=0.01; max_iter=100
+    # lr=0.01; max_iter=250
     def tune(self, max_iter=250, lr=0.01, get_train=False):
         optimizer = torch.optim.Adam(params=self.gp.parameters(), lr=lr)
         mll = ExactMarginalLogLikelihood(self.likelihood, self.gp)
@@ -168,14 +168,14 @@ class mdl():
             print(self.res_train.groupby('tt').apply(lambda x: pd.Series({'r2': r2_score(x.y, x.mu)})))
 
 
-    # X, y = Xmat_test.copy(), y_test
+    # X, y = Xmat_test.copy(), y_test.copy()
     def predict(self, X, y=None):
         assert self.isfit & self.istrained
         Xtil = torch.tensor(self.encX.transform(X[:,self.cidx.idx.values]),dtype=torch.float32).to(self.device)
         if y is not None:
             ytil = torch.tensor(self.encY.transform(y),dtype=torch.float32).to(self.device)
         ntest = Xtil.shape[0]
-        crit, cn = norm.ppf(0.975), ['mu','lb','ub']
+        cn = ['mu', 'se']
         self.gp.eval()
         self.likelihood.eval()
         res = np.zeros([ntest, 2])
@@ -188,11 +188,13 @@ class mdl():
             if y is not None:
                 self.gp.set_train_data(inputs=torch.cat([self.gp.train_inputs[0],xslice]),
                                        targets=torch.cat([self.gp.train_targets, ytil[[i]]]),strict=False)
-        res = pd.DataFrame(res, columns=['mu', 'se']).assign(lb=lambda x: x.mu - crit * x.se, ub=lambda x: x.mu + crit * x.se)
-        res = pd.DataFrame(self.encY.inverse_transform(res[cn]),columns=cn)
+        res = pd.DataFrame(res, columns=cn)
+        # Transform back to original scale (not we only need se to be multipled by sig from (X-mu)/sig
+        res['mu'] = self.encY.inverse_transform(res.mu)
+        res['se'] = res.se * self.encY.enc.scale_
         if y is not None:
             res.insert(0,'y',y)
-            print(r2_score(res.y, res.mu))
+            print('Test set R2: %0.3f' % r2_score(res.y, res.mu))
         return res
 
         # tmp = pd.concat([self.res_train.drop(columns=['se','idx']), res.assign(tt='test')])
