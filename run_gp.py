@@ -49,7 +49,7 @@ sdev = "cuda" if use_cuda else "cpu"
 print('Using device: %s' % sdev)
 device = torch.device(sdev)
 
-gpytorch.settings.max_cg_iterations(200)
+gpytorch.settings.max_cg_iterations(10000)
 
 ####################################
 # --- STEP 1: LOAD/CREATE DATA --- #
