@@ -19,7 +19,7 @@ if hasattr(args, 'groups'):
     groups = args.groups
 
 # # Debugging in PyCharm (78==March 19th)
-# lead, model, dstart, dend, groups, dtrain, dval = 4, 'gpy', 60, 61, ['CTAS'], 125, 7
+# lead, model, dstart, dend, groups, dtrain, dval = 1, 'gpy', 0, 10, ['CTAS'], 125, 7
 
 import os
 import sys
@@ -94,7 +94,7 @@ print('Test days to be predicted:\n%s\n' % ', '.join(d_pred.astype(str)))
 gp = mdl(model=model, lead=lead, cn=cn, device=device, groups=groups)
 
 holder = []
-ii = 0
+ii, btime = 0, time()
 for day, s_test in enumerate(d_pred):
     ii += 1
     # day = 78; s_test = d_pred[day]
@@ -120,8 +120,9 @@ for day, s_test in enumerate(d_pred):
     Xmat_tval, y_tval = np.vstack([Xmat_train, Xmat_valid]), np.append(y_train, y_valid)
     gp.fit(X=Xmat_tval, y=y_tval, ntrain=ntrain, nval=nval)
     if ii > 1:
-        # Load state dict from previous iteration
-        gp.gp.load_state_dict(holder_state)
+        gp.gp.load_state_dict(holder_state)  # Load state dict from previous iteration
+    if ii == 2:
+        btime = time()
     stime = time()
     gp.tune(max_iter=1000, lr=0.01)
     torch.cuda.empty_cache()
@@ -129,16 +130,9 @@ for day, s_test in enumerate(d_pred):
     res = gp.predict(X=Xmat_test, y=y_test)
     res = res.assign(date=s_test).rename_axis('hour').reset_index()
     holder.append(res)
-    print('Model took %i seconds to tune and predict' % (time() - stime))
+    nleft, rate = len(d_pred) - ii, ii / (time() - btime)
+    print('Model took %i seconds to tune and predict (ETA=%i sec' % (time() - stime, nleft/rate))
     print(res)
-    # # Day forecast
-    # tmp = pd.concat([gp.res_train.drop(columns=['se','idx']), res.assign(tt='test').drop(columns=['hour','date'])])
-    # tmp = tmp.reset_index(None, True).rename_axis('idx').reset_index()
-    # from plotnine import *
-    # gg_torch = (ggplot(tmp[tmp.tt!='train'], aes(x='idx', y='mu', color='tt')) + theme_bw() + geom_line() +
-    #             geom_vline(xintercept=gp.ntrain) + geom_ribbon(aes(ymin='lb', ymax='ub'), alpha=0.5) +
-    #             geom_point(aes(x='idx', y='y'), color='black', size=0.5, alpha=0.5))
-    # gg_torch.save(os.path.join(dir_figures, 'test.png'),width=12,height=7)
 
 ####################################
 # --- STEP 3: SAVE PREDICTIONS --- #
@@ -151,4 +145,15 @@ else:
 fn_res = fn_res.replace('.pkl', '_dstart_' + str(dstart) + '_dend_' + str(dend) + '_groups_' + sgroups + '.csv')
 df_res = pd.concat(holder).reset_index(None, True).rename(columns={'mu': 'pred'})
 df_res = df_res.assign(lead=lead, model=model, groups=sgroups, ntrain=ntrain)
-df_res.to_csv(os.path.join(dir_save, fn_res), index=True)
+df_res.to_csv(os.path.join(dir_save, fn_res), index=False)
+
+# # Day forecast
+# tmp = pd.concat([gp.res_train.drop(columns=['se','idx']), res.assign(tt='test').drop(columns=['hour','date'])])
+# tmp = tmp.reset_index(None, True).rename_axis('idx').reset_index()
+# from plotnine import *
+# gg_torch = (ggplot(tmp[tmp.tt!='train'], aes(x='idx', y='mu', color='tt')) + theme_bw() + geom_line() +
+#             geom_vline(xintercept=gp.ntrain) + geom_ribbon(aes(ymin='lb', ymax='ub'), alpha=0.5) +
+#             geom_point(aes(x='idx', y='y'), color='black', size=0.5, alpha=0.5))
+# gg_torch.save(os.path.join(dir_figures, 'test.png'),width=12,height=7)
+
+

@@ -69,7 +69,6 @@ class gp_real(ExactGP):
 # self.tune(max_iter=250, lr=0.01)
 # print(pd.Series([name for name, val in self.gp.named_parameters()]))
 # qq=self.gp.forward(self.gp.train_inputs[0])
-
 class mdl():
     def __init__(self, model, lead, cn, device, groups=None):  #, date
         self.encX, self.encY = normalizer(), normalizer()
@@ -141,7 +140,8 @@ class mdl():
         while (ldiff > tol) & (i < max_iter):
             i += 1
             optimizer.zero_grad()  # Zero gradients from previous iteration
-            output = self.gp(self.gp.train_inputs[0])  # Output from model
+            with gpytorch.settings.max_cg_iterations(10000):
+                output = self.gp(self.gp.train_inputs[0])  # Output from model
             loss = -mll(output, self.gp.train_targets)  # Calc loss and backprop gradients
             loss.backward()
             if (i + 1) % 5 == 0:
@@ -181,7 +181,7 @@ class mdl():
         res = np.zeros([ntest, 2])
         for i in range(ntest):
             xslice = Xtil[[i]]
-            with torch.no_grad():
+            with torch.no_grad(), gpytorch.settings.max_cg_iterations(10000):
                 pred = self.gp(xslice)  #self.likelihood()
             res[i] = [pred.mean.item(), pred.stddev.item()]
             # Append on test set
