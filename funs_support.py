@@ -12,7 +12,10 @@ from sklearn.linear_model import LinearRegression
 def makeifnot(path):
     if not os.path.exists(path):
         print('making folder')
-        os.mkdir(path)
+        try:
+            os.mkdir(path)
+        except:
+            print('looks like folder already exists!')
 
 def date2ymd(x):
     assert isinstance(x, pd.Series)

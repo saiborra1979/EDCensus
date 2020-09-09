@@ -1,25 +1,27 @@
 #!/bin/bash
 
-#PBS -l walltime=06:00:00
+#PBS -l walltime=12:00:00
 #PBS -o /home/edrysdale/qsub/
 #PBS -e /home/edrysdale/qsub/
-#PBS -l vmem=16g
-#PBS -l mem=16g
-#PBS -l nodes=1:ppn=4
-#PBS -t 1-12
+#PBS -l vmem=32g
+#PBS -l mem=32g
+#PBS -l nodes=1:ppn=4:gpus=1
+#PBS -q gpu
 
-# Note that the array is over the lead
+#cpu: PBS -l nodes=1:ppn=4
+#custom: PBS -t 5-6
 
-# EXAMPLE OF HOW TO RUN
-#qsub -N gpy_run pipeline_HPF.sh
-#-F "4 lasso"  -t 0-181  -l nodes=1:ppn=1
+# EXAMPLE OF HOW TO RUN: qsub -N gpy_run -t 1-6 pipeline_HPF.sh
+echo "Groups: "$groups
 
+cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow || return
 pwd
-cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow
-pwd
-. conda.env
-source activate CensusFlow
 which python
+module load python/3.8.1
+fold_env="/hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate"
+. $fold_env
+which python
+python -u check_cuda.py
 
 echo "JOBID = "$PBS_JOBID
 
@@ -28,7 +30,11 @@ lead=$(($PBS_ARRAYID))
 model="gpy"  # should line up with mdls/{}.py
 echo "Lead: "$lead", model: "$model
 
-# Call model: 212==July 30
-python -u run_gp.py --lead $lead --model gpy --dstart 0 --dend 212
+if [ "$groups" == "None" ]; then
+	echo "Not running a group"
+	python -u run_gp.py --lead $lead --model gpy --dtrain 45 --dval 7 --dstart 60 --dend 243
+else
+	python -u run_gp.py --lead $lead --model gpy --dtrain 45 --dval 7 --dstart 60 --dend 243 --groups $groups
+fi
 
 echo "##### end of script ######"
