@@ -28,13 +28,13 @@ dir_flow = os.path.join(dir_output, 'flow')
 dir_figures = os.path.join(dir_base, '..', 'figures')
 
 models = ['gpy']
-cn_ml = ['model','lead']
-
+cn_ml = ['model', 'lead']
 holder = []
 for model in models:
     path = os.path.join(dir_flow,'res_'+model+'.csv')
     holder.append(pd.read_csv(path))
 df_pred = pd.concat(holder).reset_index(None,True)
+
 # Check everyone has same horizon
 assert df_pred.groupby(cn_ml).size().unique().shape[0] == 1
 mx_month = df_pred.month.unique().max()
