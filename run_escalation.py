@@ -219,12 +219,28 @@ dat_prec = tmp1.merge(tmp2).melt(cn_rel,['prec','sens'],'metric')
 best_day = df_r2[(df_r2.model==models[0]) & (df_r2.month>=3)].groupby(cn_date).r2.min().sort_values(ascending=False).head(1).reset_index().drop(columns=['r2'])
 best_day = pd.to_datetime(list(best_day.astype(str).apply(lambda x: '-'.join(x),1))[0])
 drange = pd.date_range(best_day,periods=24,freq='1H')  #mx_leads
-df_range = df_sens[(df_sens.model==models[0]) & (df_sens.dates.isin(drange))][['lead','pred','dates']].reset_index(None,True)
+df_range = df_sens[(df_sens.model==models[0]) & (df_sens.dates.isin(drange))][['lead','pred','dates','se']].reset_index(None,True)
+df_range = df_range.assign(lb=lambda x: x.pred-1.2*x.se, ub=lambda x: x.pred+1.2*x.se)
 df_range = df_range.assign(dates2=df_range.apply(lambda x: x['dates'] + pd.DateOffset(hours=x['lead']),1))
 df_range.dates = df_range.dates.dt.strftime('%H').astype(int)
 tmp_act = act_y[act_y.date.isin(df_range.dates2.unique())]
 
 tit = 'Example of real-time trajectory for %i hours ahead\nDay %s\nBlock dots are actual values' % (mx_leads,best_day.strftime('%b %d, %Y'))
+for date in df_range.dates.unique():
+    tmp = df_range[df_range.dates==date]
+    gg = (ggplot(tmp, aes(x='dates2',y='pred',group='dates')) +
+                 theme_bw() + geom_path(alpha=0.5,arrow=arrow(type='closed',length=0.1)) +
+                 labs(y='Max patient per hour') + ggtitle(tit) +
+                 scale_x_datetime(breaks='3 hours',date_labels='%H') +
+                 theme(axis_title_x=element_blank()) +
+                 geom_point(aes(x='date',y='y'),color='black',inherit_aes=False,data=tmp_act,size=2) +
+            geom_ribbon(aes(ymin='lb',ymax='ub'),alpha=0.25,fill='blue') +
+                 geom_hline(yintercept=31,linetype='--') +
+                 geom_hline(yintercept=38,linetype='--') +
+                    scale_y_continuous(limits=[-10,60]) +
+                 geom_hline(yintercept=48,linetype='--'))
+    gg.save(os.path.join(dir_figures, 'gg_trajectory_' + str(date) + '.png'), height=6, width=12)
+
 gg_trajectory = (ggplot(df_range, aes(x='dates2',y='pred',color='dates',group='dates')) +
                  theme_bw() + geom_path(alpha=0.5,arrow=arrow(type='closed',length=0.1)) +
                  labs(y='Max patient per hour') + ggtitle(tit) +
