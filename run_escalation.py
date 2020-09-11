@@ -2,15 +2,15 @@
 SCRIPT TO COMPARE MODEL PERFORMANCE TO THE ESLCATION LEVELS
 """
 
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--nleads', type=int, default=25, help='Number of leads from process_flow.py')
-args = parser.parse_args()
-print(args)
-nleads = args.nleads
+# import argparse
+# parser = argparse.ArgumentParser()
+# parser.add_argument('--nleads', type=int, default=25, help='Number of leads from process_flow.py')
+# args = parser.parse_args()
+# print(args)
+# nleads = args.nleads
 
-# # For beta testing
-# nleads = 25
+# For beta testing
+nleads = 24
 
 import os
 import pandas as pd
@@ -19,7 +19,7 @@ from plotnine import *
 from sklearn.metrics import r2_score as r2
 from statsmodels.stats.proportion import proportion_confint as propCI
 from scipy.stats import norm
-from funs_support import cvec, rho, r2_fun
+from funs_support import cvec, ymdh2date, r2_fun
 from statsmodels.tsa.stattools import acf, pacf
 
 dir_base = os.getcwd()
@@ -48,13 +48,12 @@ df_pred = qq[qq == 24].reset_index().drop(columns=[0]).merge(df_pred)
 df_pred.dates = pd.to_datetime(df_pred.dates)
 
 # Extract the y label for the model
-tmp = pd.read_csv(os.path.join(dir_flow,'df_lead_lags.csv'),nrows=2,usecols=range(nleads+4),header=None)
+tmp = pd.read_csv(os.path.join(dir_flow,'df_lead_lags.csv'),nrows=2,usecols=range(nleads+1+4),header=None)
 assert np.all(tmp.iloc[0].fillna('y') == 'y')
 act_y = pd.read_csv(os.path.join(dir_flow,'df_lead_lags.csv'),skiprows=2,usecols=range(1+4))
 act_y.columns = np.where(act_y.columns.str.contains('Unnamed'),'_'.join(tmp.iloc[:,4]),act_y.columns)
 assert act_y.columns[-1] == 'y_lead_0'
-act_y.rename(columns={'y_lead_0':'y'}, inplace=True)
-act_y = act_y.assign(date=lambda x: pd.to_datetime(x.year.astype(str)+'-'+x.month.astype(str)+'-'+x.day.astype(str)+' '+x.hour.astype(str)+':00:00'))
+act_y = act_y.rename(columns={'y_lead_0':'y'}).assign(date=ymdh2date(act_y))
 
 # qq=df_pred.groupby(cn_ml).head(10)[['lead','dates','y']].reset_index(None,True)
 # qq['date2'] = qq.apply(lambda x: x['dates']+pd.offsets.Hour(x['lead']),1)
@@ -206,7 +205,9 @@ cn_rel = cn_ml+['CI', 'psign']
 dat_rel = pd.concat(holder).reset_index(None,True).assign(CI=lambda x: (1-2*x.p).round(2))
 dat_rel = dat_rel.merge(dat_rel.groupby(cn_rel).n.sum().reset_index().rename(columns={'n':'tot'}))
 dat_prec = dat_rel.assign(tp=lambda x: np.where(x.psign==x.ysign,'tp','fp')).groupby(cn_rel+['tp']).n.sum().reset_index()
-dat_prec = dat_prec.pivot_table('n',cn_rel,'tp').reset_index().assign(prec = lambda x: x.tp/(x.tp+x.fp))
+# WARNING! I THINK THIS NEEDS TO BE A SUM
+# dat_prec = dat_prec.pivot_table('n',cn_rel,'tp').reset_index().assign(prec = lambda x: x.tp/(x.tp+x.fp))
+dat_prec = dat_prec.pivot_table('n',cn_rel,'tp','sum').reset_index().assign(prec = lambda x: x.tp/(x.tp+x.fp))
 # Get the TPR
 tmp = dat_rel.groupby(cn_ml+['CI','ysign']).n.sum().reset_index().rename(columns={'ysign':'psign'})
 tmp1 = dat_prec.drop(columns=['tp','fp'])

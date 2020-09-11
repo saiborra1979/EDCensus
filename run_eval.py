@@ -6,11 +6,11 @@ import os
 import pandas as pd
 import numpy as np
 from plotnine import *
-from sklearn.metrics import r2_score as r2
-from sklearn.metrics import mean_squared_error as mse
-from funs_support import cindex, smoother, date2ymd, cvec
+
+from funs_support import smoother_df, cvec, ymd2date, parallel_perf, ymdh2date
 from statsmodels.stats.proportion import proportion_confint as propCI
 from scipy.stats import norm
+from time import time
 
 dir_base = os.getcwd()
 dir_figures = os.path.join(dir_base, '..', 'figures')
@@ -25,16 +25,29 @@ if cn_drop in res_mdl.columns:
 # Remove any rows with LB/UB
 res_mdl = res_mdl[~(res_mdl.lb.notnull() | res_mdl.ub.notnull())].reset_index(None, True).drop(columns=['lb', 'ub'])
 res_mdl.dates = pd.to_datetime(res_mdl.dates)
+
+# Load the "actual" outcome
+nleads=24
+tmp = pd.read_csv(os.path.join(dir_flow,'df_lead_lags.csv'),nrows=2,usecols=range(nleads+1+4),header=None)
+assert np.all(tmp.iloc[0].fillna('y') == 'y')
+act_y = pd.read_csv(os.path.join(dir_flow,'df_lead_lags.csv'),skiprows=2,usecols=range(1+4))
+act_y.columns = np.where(act_y.columns.str.contains('Unnamed'),'_'.join(tmp.iloc[:,4]),act_y.columns)
+assert act_y.columns[-1] == 'y_lead_0'
+act_y = act_y.rename(columns={'y_lead_0':'y'}).assign(date=ymdh2date(act_y))
+
 # bhat_lasso = pd.read_csv(os.path.join(dir_flow, 'bhat_lasso.csv')).drop(columns=['Unnamed: 0'])
 # Original run had only n=1000
-res_mdl.ntrain = res_mdl.ntrain.fillna(1000).astype(int)
+mi_days = 45
+res_mdl.ntrain = res_mdl.ntrain.fillna(int(mi_days * 24)).astype(int)
 # groups is for GPy only
 res_mdl.groups = res_mdl.groups.fillna('None')
+print(res_mdl.groupby(['model','groups','lead']).size())
 
 # Subset the GP data
 res_gp = res_mdl[res_mdl.model.str.contains('gpy')].reset_index(None, True).drop(columns='model')
 res_gp = res_gp.sort_values(['lead', 'year', 'month', 'day']).reset_index(None, True)
 res_gp.dates = pd.to_datetime(res_gp.dates.astype(str) + ' ' + res_gp.hour.astype(str) + ':00:00')
+# Save for later
 
 # Create a comparison group
 res_rest = res_mdl[res_mdl.groups == 'None']
@@ -51,37 +64,95 @@ res_rest = res_rest[res_rest.dates.isin(date_intersect)]
 # qq = res_rest.query('month==4 & day==4 & model=="gpy"')[['model','hour','y','pred','se']]
 
 #####################################
-# --- STEP 1: AGGREGATE RESULTS --- #
+# --- STEP 1: GP VS PARA MODELS --- #
 
 di_mdl = {'lasso': 'Lasso', 'local': 'Locally weighted', 'gpy': 'GP'}
+cn_date = ['year', 'month', 'day']
+cn_perf = ['r2', 'rmse', 'conc']
 
 # PERFORMANCE STARTS TO DETERIORATE ON MARCH 16
-r2_mdl = res_rest.groupby(['model', 'lead', 'year', 'month', 'day']).apply(lambda x: pd.Series(
-    {'r2': r2(x.y, x.pred), 'rmse': mse(x.y, x.pred, squared=False), 'conc': cindex(x.y.values, x.pred.values)}))
-r2_mdl = r2_mdl.reset_index().assign(
-    date=lambda x: pd.to_datetime(x.year.astype(str) + '-' + x.month.astype(str) + '-' + x.day.astype(str)))
-r2_mdl = r2_mdl.melt(r2_mdl.columns.drop(['r2', 'rmse', 'conc']), None, 'metric')
-r2_mdl['tmp'] = r2_mdl.groupby(['model', 'lead', 'metric']).cumcount()
-holder = r2_mdl.groupby(['model', 'lead', 'metric']).apply(
-    lambda x: pd.Series({'smooth': smoother(x=x.value.values, lam=0.1), 'idx': x.tmp.values}))
-holder = holder.explode('smooth').drop(columns='idx').reset_index().assign(tmp=holder.explode('idx').idx.values)
-holder['tmp'] = holder.tmp.astype(int)
-holder['smooth'] = holder.smooth.astype(float)
-r2_mdl = r2_mdl.merge(holder, 'left', on=['model', 'lead', 'metric', 'tmp'])
-r2_mdl = r2_mdl.assign(model=lambda x: x.model.map(di_mdl))
+cn_para = ['model', 'lead']
+cn_multi = cn_para+cn_date
+r2_mdl = parallel_perf(data=res_rest, gg=cn_multi)
+r2_mdl.rename(columns=dict(zip(range(len(cn_multi)),cn_multi)), inplace=True)
+r2_mdl.insert(0,'date',ymd2date(r2_mdl[cn_date]))
+r2_mdl = r2_mdl.melt(r2_mdl.columns.drop(cn_perf), None, 'metric')
+cn_smooth = cn_para + ['metric']
+r2_mdl = smoother_df(df=r2_mdl, gg=cn_smooth, lam=0.1).assign(model=lambda x: x.model.map(di_mdl))
 
-###################################################
-# --- STEP 2: CAN WE LEARN NON-PARA BOUNDARY? --- #
+################################
+# --- STEP 2: GP GROUPINGS --- #
 
-# # Goal: Draw a threshold so that only 5% of of actual values are below it
-# sub = res_mdl[(res_mdl.lead==4) & (res_mdl.model=='local')].drop(columns=['lead','model','year','day','hour']).reset_index(None, True).sort_values('dates').reset_index(None,True)
-# sub_train = sub[sub.dates < pd.to_datetime('2020-03-19')]
-# # Pick a test year
-# sub_test = sub[(sub.dates<pd.to_datetime('2020-03-26')) & (sub.dates>=pd.to_datetime('2020-03-19'))]
-# # Compare the distribution of residuals by month....
+cn_desc = ['mean','25%','50%','75%']
+di_desc = dict(zip(cn_desc, ['mu', 'lb', 'med','ub']))
+cn_gp = ['groups','ntrain','lead']
+cn_multi = cn_gp+cn_date
 
-##############################
-# --- STEP 3: GP RESULTS --- #
+# Load existing file?
+stime = time()
+perf_gp = parallel_perf(data=res_gp, gg=cn_multi)
+print('Took %i seconds to calculate' % (time() - stime))
+perf_gp.rename(columns=dict(zip(range(len(cn_multi)),cn_multi)), inplace=True)
+perf_gp.insert(0,'date',ymd2date(perf_gp[cn_date]))
+perf_gp = perf_gp.melt(perf_gp.columns.drop(cn_perf), None, 'metric')
+cn_smooth = cn_gp + ['metric']
+perf_gp = smoother_df(df=perf_gp, gg=cn_smooth, lam=0.1)
+# Average over the dates
+grpz_gp = perf_gp.groupby(cn_smooth).value.describe()[cn_desc].reset_index().rename(columns=di_desc)
+# Average over the leads
+leads_gp = perf_gp.groupby(cn_gp[:-1] + ['metric']).value.describe()[cn_desc].reset_index().rename(columns=di_desc)
+# perf_gp.pivot_table('value',['metric','ntrain','lead','date'],'groups').groupby(['metric','lead']).corr()
+
+##################################
+# --- STEP 3: GP SAMPLE SIZE --- #
+
+# RESULTS TO BE RUN
+
+##################################
+# --- STEP 4: CLASSIFICATION --- #
+
+# Compare predicted level to current one, and calculate sensitivity/precision
+res_class_grpz = res_gp.drop(columns=cn_date+['hour','se'])
+res_class_grpz.rename(columns={'dates':'date_rt', 'y':'y_pred','pred':'hat_pred'},inplace=True)
+res_class_grpz = res_class_grpz.assign(date_pred=lambda x: x.date_rt+pd.to_timedelta(x.lead,unit='H'))
+res_class_grpz = res_class_grpz.merge(act_y.rename(columns={'y':'y_rt', 'date':'date_rt'}).drop(columns=cn_date+['hour']),
+                     'left','date_rt')
+# Make the cuts
+ymx = res_class_grpz.y_rt.max() + 1
+ymi = res_class_grpz.hat_pred.min() - 1
+esc_bins = [ymi, 31, 38, 48, ymx]
+esc_lbls = ['≤30', '31-37', '38-47', '≥48']
+cn_pred = ['y_rt','y_pred','hat_pred']
+res_class_grpz[cn_pred] = res_class_grpz[cn_pred].apply(lambda x: pd.Categorical(pd.cut(x,esc_bins,False,esc_lbls)).codes)
+res_class_grpz = res_class_grpz.melt(cn_gp+['date_rt','y_rt'],['y_pred','hat_pred'],'tt','value')
+res_class_grpz = res_class_grpz.assign(delta=lambda x: np.sign(x.value - x.y_rt))
+res_class_grpz = res_class_grpz.pivot_table('delta',cn_gp+['date_rt','y_rt'],'tt').reset_index()
+res_class_grpz.rename(columns={'hat_pred':'pred','y_pred':'y'},inplace=True)
+res_class_agg = res_class_grpz.pivot_table('date_rt',cn_gp+['pred'],'y','count').fillna(0).astype(int)
+res_class_agg = res_class_agg.reset_index().melt(cn_gp+['pred'],None,None,'n')
+res_class_agg = res_class_agg.assign(tp=lambda x: np.where(x.pred==x.y,'tp','fp'))
+# Calculate the precision
+res_class_prec = res_class_agg.groupby(cn_gp+['pred','tp']).n.sum().reset_index()
+res_class_prec = res_class_agg.pivot_table('n',cn_gp+['pred'],'tp','sum').astype(int).reset_index()
+res_class_prec = res_class_prec.assign(prec = lambda x: x.tp/(x.tp+x.fp)).drop(columns=['tp','fp'])
+# Calculate sensitivity
+res_class_sens = res_class_agg.query('tp=="tp"').merge(res_class_agg.groupby(cn_gp+['y']).n.sum().reset_index().rename(columns={'n':'tot'}))
+res_class_sens = res_class_sens.drop(columns=['y','tp']).assign(sens=lambda x: x.n/x.tot).drop(columns=['n','tot'])
+res_class_both = res_class_prec.merge(res_class_sens).melt(cn_gp+['pred'],None,'metric')
+# print(res_class_both.groupby('lead')[['prec','sens']].mean())
+# # Spot check
+# print(res_class_both.loc[644])
+# print(res_class_agg.query('groups=="mds"&lead==23').sort_values('pred'))
+# print('Precision: %0.3f, Sens: %0.3f' % (252/(252+105+9), (252/(252+253+8))) )
+
+# Rank
+cn_rank = ['metric','ntrain','lead','value']
+res_class_rank = res_class_both.query('pred==1').drop(columns='pred').sort_values(cn_rank).reset_index(None,True)
+res_class_rank['ridx'] = res_class_rank.groupby(cn_rank[:-1]).cumcount()
+res_class_rank = res_class_rank.groupby(['metric','groups']).ridx.mean().reset_index()
+
+#################################
+# --- STEP 5: GP STATISTICS --- #
 
 # CI for missing value
 res_gp = res_gp.assign(lb=lambda x: x.pred - norm.ppf(0.975) * x.se, ub=lambda x: x.pred + norm.ppf(0.975) * x.se)
@@ -134,6 +205,83 @@ dat_months_long = pd.concat([dat_months_long, tmp], 1)
 ################################
 # --- STEP 4: PLOT RESULTS --- #
 
+di_metric = {'r2': 'R-squared', 'conc': 'Concordance', 'rmse': 'RMSE'}
+
+### PARA VS BL-GP ###
+for metric in di_metric:
+    print(metric)
+    tmp = r2_mdl[(r2_mdl.metric == metric)]
+    fn, lbl = 'gg_perf_' + metric + '.png', di_metric[metric]
+    title = 'Performance by model: ' + lbl + '\nOne-day-ahead predictions'
+    gg_tmp = (ggplot(tmp, aes(x='date', y='value', color='model')) +
+              geom_point(size=0.1, alpha=0.5) + geom_line(alpha=0.5) +
+              theme_bw() + labs(y=lbl) + scale_color_discrete(name='Model') +
+              theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90),
+                    subplots_adjust={'wspace': 0.25}) +
+              ggtitle(title) + facet_wrap('lead', labeller=label_both, scales='free_y') +
+              scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
+              geom_line(aes(x='date', y='smooth', color='model')))
+    gg_tmp.save(os.path.join(dir_figures, fn), height=5, width=8)
+
+
+### GPs for different groups ###
+for metric in di_metric:
+    print(metric)
+    tmp = perf_gp[(perf_gp.metric == metric)]
+    fn, lbl = 'gg_gpy_perf_' + metric + '.png', di_metric[metric]
+    title = 'Performance by model: ' + lbl
+    gg_tmp = (ggplot(tmp, aes(x='date', y='smooth', color='groups')) +
+              geom_line(size=1) + theme_bw() + labs(y=lbl) +
+              scale_color_discrete(name='Model') + ggtitle(title) +
+              theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90),
+                    subplots_adjust={'wspace': 0.25}) +
+              facet_wrap('~lead',scales='free_y',labeller=label_both) +
+              scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y'))
+    gg_tmp.save(os.path.join(dir_figures, fn),height=16,width=17)
+
+
+### GPs groups all time points ###
+
+gg_grpz = (ggplot(grpz_gp.query('lead>=4'), aes(x='lead',y='med',color='groups')) +
+           theme_bw() + geom_point() + geom_line() +
+           facet_wrap('~metric',labeller=labeller(metric=di_metric),scales='free_y') +
+           ggtitle('Performance over time') +
+           theme(subplots_adjust={'wspace': 0.1},legend_position='bottom') +
+           scale_x_continuous(breaks=list(range(0,24+1))) +
+           labs(y='Value',x='Forecasting lead'))
+gg_grpz.save(os.path.join(dir_figures, 'gg_grpz.png'),height=6,width=18)
+
+
+gg_leads_gp = (ggplot(leads_gp, aes(x='groups',y='med')) +
+           theme_bw() + geom_point() +
+           geom_linerange(aes(ymin='lb',ymax='ub')) +
+           facet_wrap('~metric',labeller=labeller(metric=di_metric),scales='free_y') +
+           ggtitle('Average performance over all leads\nLine range in IQR') +
+           theme(subplots_adjust={'wspace': 0.1},legend_position='bottom',
+                 axis_text_x=element_text(angle=90)) +
+           labs(y='Value',x='Grouping'))
+gg_leads_gp.save(os.path.join(dir_figures, 'gg_leads_gp.png'),height=5,width=15)
+
+di_pr = {'prec':'Precision', 'sens':'Recall'}
+### Precision/Recall tradeoff ###
+tmp = res_class_both.query('pred==1').copy()
+gg_pr_class = (ggplot(tmp, aes(x='lead',y='value',color='groups')) + theme_bw() +
+               geom_point() + geom_line() +
+               facet_wrap('~metric',labeller=labeller(metric=di_pr)) +
+               ggtitle('Precision/Recall for Δ>0 in Esc Level') +
+               labs(x='Forecast lead',y='Value') +
+               theme(subplots_adjust={'wspace': 0.1}) +
+               scale_x_continuous(breaks=list(range(25))))
+gg_pr_class.save(os.path.join(dir_figures, 'gg_pr_class.png'),height=5,width=12)
+
+gg_pr_rank = (ggplot(res_class_rank,aes(x='groups',y='ridx',color='metric')) +
+              theme_bw() + geom_point(size=3,position=position_dodge(0.5)) +
+              labs(y='Average rank') +
+              ggtitle('Rank-order across the leads by group\nHigher is better') +
+              scale_color_discrete(name='metric',labels=['PPV','Recall']))
+gg_pr_rank.save(os.path.join(dir_figures, 'gg_pr_rank.png'),height=5,width=6)
+
+
 di_measure = {'pred': 'Mean', 'lb': 'Lower-bound', 'ub': 'Upper-bound'}
 
 ### SCATTERPLOT OF PREDICTED VS ACTUAL AND LB/UB ###
@@ -170,19 +318,15 @@ gg_months = (ggplot(dat_months_long, aes(x='month.astype(str)', y='value', fill=
              ggtitle('GP violation rate by outcome month (2020)\n95% Prediction Interval'))
 gg_months.save(os.path.join(dir_figures, 'gg_viol_month.png'), height=5, width=8)
 
-### LEAD PERFORMANCE ###
-di_metric = {'r2': 'R-squared', 'conc': 'Concordance', 'rmse': 'RMSE'}
 
-for metric in di_metric:
-    print(metric)
-    tmp = r2_mdl[(r2_mdl.metric == metric)]
-    fn, lbl = 'gg_perf_' + metric + '.png', di_metric[metric]
-    title = 'Performance by model: ' + lbl + '\nOne-day-ahead predictions'
-    gg_tmp = (ggplot(tmp, aes(x='date', y='value', color='model')) +
-              geom_point(size=0.1, alpha=0.5) + geom_line(alpha=0.5) +
-              theme_bw() + labs(y=lbl) + scale_color_discrete(name='Model') +
-              theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90)) +
-              ggtitle(title) + facet_wrap('lead', labeller=label_both, scales='free_y') +
-              scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
-              geom_line(aes(x='date', y='smooth', color='model')))
-    gg_tmp.save(os.path.join(dir_figures, fn), height=5, width=8)
+
+
+###################################################
+# --- STEP X: CAN WE LEARN NON-PARA BOUNDARY? --- #
+
+# # Goal: Draw a threshold so that only 5% of of actual values are below it
+# sub = res_mdl[(res_mdl.lead==4) & (res_mdl.model=='local')].drop(columns=['lead','model','year','day','hour']).reset_index(None, True).sort_values('dates').reset_index(None,True)
+# sub_train = sub[sub.dates < pd.to_datetime('2020-03-19')]
+# # Pick a test year
+# sub_test = sub[(sub.dates<pd.to_datetime('2020-03-26')) & (sub.dates>=pd.to_datetime('2020-03-19'))]
+# # Compare the distribution of residuals by month....

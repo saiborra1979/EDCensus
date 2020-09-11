@@ -8,6 +8,29 @@ from math import radians, cos, sin, asin, sqrt
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 
+from sklearn.metrics import r2_score as r2
+from sklearn.metrics import mean_squared_error as mse
+
+
+import multiprocessing
+
+def get_perf(groups):
+    cn = groups[0]
+    df = groups[1]
+    res = pd.DataFrame(cn).T.assign(rmse=mse(df.y, df.pred, squared=False), r2=r2(df.y, df.pred), conc=cindex(df.y, df.pred))
+    return res
+
+
+def parallel_perf(data, gg):
+    data_split = data.groupby(gg)
+    n_cpus = os.cpu_count()-1
+    print('Number of CPUs: %i' % n_cpus)
+    pool = multiprocessing.Pool(processes=n_cpus)
+    data = pd.concat(pool.map(get_perf, data_split))
+    pool.close()
+    pool.join()
+    return data
+
 
 def makeifnot(path):
     if not os.path.exists(path):
@@ -28,6 +51,20 @@ def date2ymdh(x):
     assert isinstance(x, pd.Series)
     year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
     return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
+
+def ymd2date(x):
+    assert isinstance(x, pd.DataFrame)
+    cn = ['year','month','day']
+    assert x.columns.isin(cn).sum() == len(cn)
+    dd  = pd.to_datetime(x.year.astype(str) + '-' + x.month.astype(str) + '-' + x.day.astype(str))
+    return dd
+
+def ymdh2date(x):
+    assert isinstance(x, pd.DataFrame)
+    cn = ['year','month','day','hour']
+    assert x.columns.isin(cn).sum() == len(cn)
+    dd  = pd.to_datetime(x.year.astype(str) + '-' + x.month.astype(str) + '-' + x.day.astype(str)+' '+x.hour.astype(str)+':00:00')
+    return dd
 
 def rho(x,y):
     return pd.DataFrame({'x':x,'y':y}).corr().iloc[0,1]
@@ -85,6 +122,23 @@ def smoother(x,lam=0.5):
     weighted = np.sum(cvec(x) * dist,0) / dist.sum(0)
     return weighted
 
+# df=r2_mdl.copy();gg=cn_melt;lam=0.1
+# del df, gg, lam, holder
+def smoother_df(df, gg, lam=0.1):
+    """
+    WILL APPLY SMOOTHER FUNCTION ON df WITH GROUPS gg
+    ASSUMES 'value' IN COLUMN
+    """
+    assert isinstance(df, pd.DataFrame)
+    assert 'value' in df
+    df['tmp'] = df.groupby(gg).cumcount()
+    holder = df.groupby(gg).apply(
+        lambda x: pd.Series({'smooth': smoother(x=x.value.values, lam=lam), 'idx': x.tmp.values}))
+    holder = holder.explode('smooth').drop(columns='idx').reset_index().assign(tmp=holder.explode('idx').idx.values)
+    holder['tmp'] = holder.tmp.astype(int)
+    holder['smooth'] = holder.smooth.astype(float)
+    df = df.merge(holder, 'left', on=gg + ['tmp']).drop(columns=['tmp'])
+    return df
 
 def cindex(y, pred):
     """
