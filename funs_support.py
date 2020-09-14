@@ -11,8 +11,40 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score as r2
 from sklearn.metrics import mean_squared_error as mse
 
-
 import multiprocessing
+
+from statsmodels.stats.proportion import proportion_confint as propCI
+
+def add_CI(df, method='beta', alpha=0.05):
+    assert df.columns.isin(['n','value']).sum() == 2
+    holder = pd.concat(propCI(count=(df.n * df.value).astype(int), nobs=df.n, alpha=alpha, method=method), 1)
+    holder = pd.concat([df, holder.rename(columns={0: 'lb', 1: 'ub'})],1)
+    return holder
+
+# df=res_class_grpz.copy(); gg = cn_gp #; df[cn_y] = np.sign(df[cn_y])
+# del cn_y, df, df_prec, df_sens, df_both
+def sens_spec_df(df, gg):
+    """
+    FUNCTION TO CALCULATE SENSITIVITY/SPECIFCITY FOR A DATAFRAME THAT HAS A
+    "pred" AND "y" and "y_rt" COLUMN WITH LABELS
+    """
+    cn_y = ['y_rt', 'pred', 'y']
+    assert df.columns.isin(cn_y).sum() == len(cn_y)
+    df = df[cn_y + gg].rename_axis('idx').reset_index(None)
+    df = df.pivot_table('idx', gg + ['pred'], 'y', 'count').fillna(0).astype(int)
+    df = df.reset_index().melt(gg + ['pred'], None, None, 'n')
+    df = df.assign(tp=lambda x: np.where(x.pred == x.y, 'tp', 'fp'))
+    # Calculate the precision
+    df_prec = df.groupby(gg + ['pred', 'tp']).n.sum().reset_index()
+    df_prec = df_prec.pivot_table('n', gg + ['pred'], 'tp', 'sum').astype(int).reset_index()
+    df_prec = df_prec.assign(value=lambda x: x.tp / (x.tp + x.fp),
+                             den=lambda x: x.tp + x.fp, metric='prec').drop(columns=['tp', 'fp'])
+    # Calculate sensitivity
+    df_sens = df.query('tp=="tp"').merge(df.groupby(gg + ['y']).n.sum().reset_index().rename(columns={'n': 'den'}))
+    df_sens = df_sens.drop(columns=['y', 'tp']).assign(value=lambda x: x.n / x.den, metric='sens').drop(columns='n')
+    # Stack
+    df_both = pd.concat([df_prec, df_sens]).reset_index(None, True)
+    return df_both
 
 def get_perf(groups):
     cn = groups[0]
@@ -20,17 +52,17 @@ def get_perf(groups):
     res = pd.DataFrame(cn).T.assign(rmse=mse(df.y, df.pred, squared=False), r2=r2(df.y, df.pred), conc=cindex(df.y, df.pred))
     return res
 
-
-def parallel_perf(data, gg):
+# data=res_rest.copy();gg=cn_multi;n_cpus=10
+def parallel_perf(data, gg, n_cpus=None):
     data_split = data.groupby(gg)
-    n_cpus = os.cpu_count()-1
+    if n_cpus is None:
+        n_cpus = os.cpu_count()-1
     print('Number of CPUs: %i' % n_cpus)
     pool = multiprocessing.Pool(processes=n_cpus)
     data = pd.concat(pool.map(get_perf, data_split))
     pool.close()
     pool.join()
     return data
-
 
 def makeifnot(path):
     if not os.path.exists(path):
