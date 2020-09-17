@@ -15,6 +15,15 @@ import multiprocessing
 
 from statsmodels.stats.proportion import proportion_confint as propCI
 
+from colorspace.colorlib import HCL
+
+def gg_color_hue(n):
+    hues = np.linspace(15, 375, num=n + 1)[:n]
+    hcl = []
+    for h in hues:
+        hcl.append(HCL(H=h, L=65, C=100).colors()[0])
+    return hcl
+
 def add_CI(df, method='beta', alpha=0.05):
     assert df.columns.isin(['n','value']).sum() == 2
     holder = pd.concat(propCI(count=(df.n * df.value).astype(int), nobs=df.n, alpha=alpha, method=method), 1)
