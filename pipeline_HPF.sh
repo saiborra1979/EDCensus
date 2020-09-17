@@ -13,6 +13,8 @@
 
 # EXAMPLE OF HOW TO RUN: qsub -N gpy_run -t 1-6 pipeline_HPF.sh
 echo "Groups: "$groups
+ndays=$(($ndays))
+echo "Number of days: "$ndays
 
 cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow || return
 pwd
@@ -32,9 +34,9 @@ echo "Lead: "$lead", model: "$model
 
 if [ "$groups" == "None" ]; then
 	echo "Not running a group"
-	python -u run_gp.py --lead $lead --model gpy --dtrain 45 --dval 7 --dstart 60 --dend 243
+	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 243
 else
-	python -u run_gp.py --lead $lead --model gpy --dtrain 45 --dval 7 --dstart 60 --dend 243 --groups $groups
+	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 243 --groups $groups
 fi
 
 echo "##### end of script ######"
