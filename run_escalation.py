@@ -229,9 +229,42 @@ gg_tp_full = (ggplot(tmp, aes(x='lead', y='n', color='metric')) +
               theme(subplots_adjust={'wspace': 0.10}))
 gg_tp_full.save(os.path.join(dir_figures, 'gg_tp_full.png'), height=7, width=14)
 
+######################################
+# --- (6) Precision/Recall Curve --- #
+
+p_seq = np.arange(0.5,1.0,0.01)
+holder = []
+for p in p_seq:
+    crit = norm.ppf(p)
+    tmp = best_ypred.drop(columns=cn_ymdh).assign(lb=lambda x: x.pred-crit*x.se).drop(columns=['pred','se']).rename(columns={'y':'y_pred', 'lb':'pred', 'dates':'date'})
+    print(np.mean(tmp.y_pred > tmp.pred))
+    tmp = tmp.merge(act_y[['y', 'date']]).rename(columns={'y':'y_rt', 'date':'date_rt','y_pred':'y'})
+    cn = ['y','y_rt','pred']
+    tmp[cn] = tmp[cn].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
+    assert np.all(tmp.y_rt.value_counts() == best_ylbl.y_rt.value_counts())
+    tmp = tmp.assign(y=lambda x: x.y - x.y_rt, pred=lambda x: x.pred - x.y_rt)
+    assert np.all(tmp.y.value_counts() == best_ylbl.y.value_counts())
+    tmp[['y', 'pred']] = tmp[['y', 'pred']].clip(-1, 1)
+    holder.append(sens_spec_df(df=tmp, gg=['lead']).assign(lb=p))
+# Merge and plot
+df_pr = pd.concat(holder).reset_index(None,True).assign(lb=lambda x: 2*(x.lb-0.5))
+df_pr = df_pr.query('pred==1').pivot_table('value',['lead','lb'],'metric').reset_index()
+gg_pr_curve = (ggplot(df_pr, aes(x='sens',y='prec',color='lead',group='lead')) +
+               theme_bw() + geom_line() + labs(x='Recall',y='Precision') +
+               geom_abline(slope=-1,intercept=1,linetype='--') +
+               scale_color_cmap(name='Horizon') +
+               scale_x_continuous(limits=[0,1])+scale_y_continuous(limits=[0,1]))
+gg_pr_curve.save(os.path.join(dir_figures, 'gg_pr_curve.png'), height=5, width=6)
+# gg_pr_curve = (ggplot(df_pr, aes(x='sens',y='prec',color='lb',group='lead')) +
+#                theme_bw() + geom_line() + labs(x='Recall',y='Precision') +
+#                facet_wrap('~lead',labeller=label_both) +
+#                geom_abline(slope=-1,intercept=1,linetype='--') +
+#                scale_color_gradient(name='Lower bound (%)',low='blue',high='red') +
+#                scale_x_continuous(limits=[0,1])+scale_y_continuous(limits=[0,1]))
+# gg_pr_curve.save(os.path.join(dir_figures, 'gg_pr_curve.png'), height=12, width=12)
 
 ##########################################
-# --- (6) EXAMPLE OF TRAJECTORY PLOT --- #
+# --- (7) EXAMPLE OF TRAJECTORY PLOT --- #
 
 perf_days = df_pred.drop(columns=cn_ymdh+['se']).rename(columns={'dates':'date_rt'}).sort_values(['lead','date_rt'])
 perf_days = perf_days.assign(date_pred=perf_days.assign(lead2=lambda x: x.lead).groupby('lead').apply(lambda x: x.date_rt+pd.DateOffset(hours=int(x.lead2.min()))).values).assign(doy_pred=lambda x: x.date_pred.dt.dayofyear, doy_rt=lambda x: x.date_rt.dt.dayofyear)

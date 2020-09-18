@@ -11,13 +11,10 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score as r2
 from sklearn.metrics import mean_squared_error as mse
 
-import multiprocessing
-
 from statsmodels.stats.proportion import proportion_confint as propCI
 
-from colorspace.colorlib import HCL
-
 def gg_color_hue(n):
+    from colorspace.colorlib import HCL
     hues = np.linspace(15, 375, num=n + 1)[:n]
     hcl = []
     for h in hues:
@@ -30,7 +27,7 @@ def add_CI(df, method='beta', alpha=0.05):
     holder = pd.concat([df, holder.rename(columns={0: 'lb', 1: 'ub'})],1)
     return holder
 
-# df=res_class_grpz.copy(); gg = cn_gp #; df[cn_y] = np.sign(df[cn_y])
+# df=tmp.copy(); gg = ['lead']
 # del cn_y, df, df_prec, df_sens, df_both
 def sens_spec_df(df, gg):
     """
@@ -45,7 +42,7 @@ def sens_spec_df(df, gg):
     df = df.assign(tp=lambda x: np.where(x.pred == x.y, 'tp', 'fp'))
     # Calculate the precision
     df_prec = df.groupby(gg + ['pred', 'tp']).n.sum().reset_index()
-    df_prec = df_prec.pivot_table('n', gg + ['pred'], 'tp', 'sum').astype(int).reset_index()
+    df_prec = df_prec.pivot_table('n', gg + ['pred'], 'tp', 'sum').fillna(0).astype(int).reset_index()
     df_prec = df_prec.assign(value=lambda x: x.tp / (x.tp + x.fp),
                              den=lambda x: x.tp + x.fp, metric='prec').drop(columns=['tp', 'fp'])
     # Calculate sensitivity
@@ -63,6 +60,7 @@ def get_perf(groups):
 
 # data=res_rest.copy();gg=cn_multi;n_cpus=10
 def parallel_perf(data, gg, n_cpus=None):
+    import multiprocessing
     data_split = data.groupby(gg)
     if n_cpus is None:
         n_cpus = os.cpu_count()-1
