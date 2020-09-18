@@ -142,7 +142,7 @@ if groups is None:
     sgroups = str(groups)
 else:
     sgroups = '-'.join(groups)
-fn_res = fn_res.replace('.pkl', '_dstart_' + str(dstart) + '_dend_' + str(dend) + '_groups_' + sgroups + '.csv')
+fn_res = fn_res.replace('.pkl', '_dstart_' + str(dstart) + '_dend_' + str(dend) + '_dtrain_' + str(dtrain)  + '_groups_' + sgroups + '.csv')
 df_res = pd.concat(holder).reset_index(None, True).rename(columns={'mu': 'pred'})
 df_res = df_res.assign(lead=lead, model=model, groups=sgroups, ntrain=ntrain)
 df_res.to_csv(os.path.join(dir_save, fn_res), index=False)
