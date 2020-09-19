@@ -82,7 +82,7 @@ mat_trans = mat_trans.merge(mat_trans.groupby('esc').y.sum().reset_index().renam
     prob=lambda x: x.y / x.n).drop(columns=['y', 'n'])
 
 ### DAILY SHARE OF ESCLATION LEVELS
-colz = ['green','#e8e409','orange','red']
+colz_esc = ['green','#e8e409','orange','red']
 lblz = ['Normal','Level 1','Level 2','Level 3']
 lblz = pd.Categorical(lblz, lblz)
 gg_esc_share = (ggplot(act_esc, aes(x='doy', y='share', color='esc')) + theme_bw() +
@@ -90,7 +90,7 @@ gg_esc_share = (ggplot(act_esc, aes(x='doy', y='share', color='esc')) + theme_bw
                 ggtitle('Daily share of esclation levels (max patients per hour)') +
                 theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90)) +
                 scale_x_datetime(breaks='1 month', date_labels='%b, %Y') +
-                scale_color_manual(name='Level',values=colz))
+                scale_color_manual(name='Level',values=colz_esc))
 gg_esc_share.save(os.path.join(dir_figures, 'gg_esc_share.png'), height=6, width=10)
 
 tmp = pd.DataFrame({'x':dmin-pd.DateOffset(days=8),'y':[15,35,45,55], 'lbl':lblz})
@@ -105,7 +105,7 @@ gg_act_y = (ggplot(act_y, aes(x='date', y='y')) + theme_bw() +
             annotate('rect',xmin=dmin,xmax=dmax,ymin=38,ymax=48,fill='orange',alpha=0.25)+
             annotate('rect',xmin=dmin,xmax=dmax,ymin=48,ymax=act_y.y.max(),fill='red',alpha=0.25) +
             geom_text(aes(x='x',y='y',label='lbl',color='lbl'),data=tmp) +
-            scale_color_manual(values=colz) + guides(color=False))
+            scale_color_manual(values=colz_esc) + guides(color=False))
 gg_act_y.save(os.path.join(dir_figures, 'gg_act_y.png'), height=5, width=15)
 
 ### TRANSITION PROBABILITIES
@@ -175,7 +175,7 @@ posd = position_dodge(0.5)
 tmp1 = add_CI(res_sp_agg.query('pred==1').rename(columns={'den':'n'})).assign(pred=0)
 tmp2 = add_CI(res_sp_full.query('pred > 0').rename(columns={'den':'n'}))
 tmp = pd.concat([tmp1, tmp2]).reset_index(None,True)
-colz = ['black'] + gg_color_hue(3)
+colz_gg = ['black'] + gg_color_hue(3)
 lblz = ['≥0', '1', '2', '3']
 
 tit = 'Precision/Recall for predicting Δ>0 in escalation\n95% CI (beta method)'
@@ -185,7 +185,7 @@ gg_sp_full = (ggplot(tmp, aes(x='lead', y='value', color='pred.astype(str)')) +
               labs(x='Forecasting lead', y='Precision/Recall') +
               geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
               facet_wrap('~metric', labeller=labeller(metric=di_pr)) +
-              scale_color_manual(name='Δ esclation',values=colz, labels=lblz) +
+              scale_color_manual(name='Δ esclation',values=['black'] + colz_esc[1:], labels=lblz) +
               theme(legend_position=(0.5, -0.05),legend_direction='horizontal'))
 gg_sp_full.save(os.path.join(dir_figures, 'gg_sp_full.png'), height=5, width=13)
 
@@ -225,7 +225,7 @@ gg_tp_full = (ggplot(tmp, aes(x='lead', y='n', color='metric')) +
              scale_x_continuous(breaks=list(range(1,25))) +
              labs(x='Forecasting lead', y='Count') +
              facet_wrap('~pred',scales='free_y',labeller=label_both) +
-              scale_color_manual(values=colz, name='Metric') +
+              scale_color_manual(values=colz_gg, name='Metric') +
               theme(subplots_adjust={'wspace': 0.10}))
 gg_tp_full.save(os.path.join(dir_figures, 'gg_tp_full.png'), height=7, width=14)
 

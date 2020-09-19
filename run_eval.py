@@ -47,7 +47,7 @@ print(res_mdl.groupby(['model', 'groups', 'lead']).size())
 res_gp = res_mdl[res_mdl.model.str.contains('gpy')].reset_index(None, True).drop(columns='model')
 res_gp = res_gp.sort_values(['lead', 'year', 'month', 'day']).reset_index(None, True)
 res_gp.dates = pd.to_datetime(res_gp.dates.astype(str) + ' ' + res_gp.hour.astype(str) + ':00:00')
-res_gp = res_gp.query('ntrain > 150').reset_index(None, True)
+res_gp = res_gp.reset_index(None, True)
 # Save for later
 
 # Create a comparison group
@@ -55,12 +55,12 @@ res_rest = res_mdl[res_mdl.groups == 'None']
 # Subset to same lead
 tmp = res_rest.groupby(['model']).lead.unique().to_list()
 lead_intersect = pd.Series(list(set.intersection(*map(set, tmp)))).sort_values().reset_index(None, True)
-res_rest = res_rest.query('lead.isin(@lead_intersect)').reset_index(None, True)
+res_rest = res_rest.query('lead.isin(@lead_intersect)', engine='python').reset_index(None, True)
 # Subset to the shared date frame
 res_rest.dates = pd.to_datetime(res_rest.dates.dt.strftime('%Y-%m-%d'))
 tmp = res_rest.groupby('model').dates.unique().to_list()
 date_intersect = pd.Series(list(set.intersection(*map(set, tmp)))).sort_values().reset_index(None, True)
-res_rest = res_rest.query('dates.isin(@date_intersect)').reset_index(None, True)
+res_rest = res_rest.query('dates.isin(@date_intersect)',engine='python').reset_index(None, True)
 
 #####################################
 # --- STEP 1: GP VS PARA MODELS --- #

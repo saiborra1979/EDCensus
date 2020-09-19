@@ -11,6 +11,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score as r2
 from sklearn.metrics import mean_squared_error as mse
 
+import multiprocessing
+
 from statsmodels.stats.proportion import proportion_confint as propCI
 
 def gg_color_hue(n):
@@ -60,7 +62,6 @@ def get_perf(groups):
 
 # data=res_rest.copy();gg=cn_multi;n_cpus=10
 def parallel_perf(data, gg, n_cpus=None):
-    import multiprocessing
     data_split = data.groupby(gg)
     if n_cpus is None:
         n_cpus = os.cpu_count()-1

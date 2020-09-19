@@ -35,12 +35,7 @@ echo "(3) Get descriptive statistics"
 echo "(4) Run Gaussian Process in Parallel"
 for ll in {1..24..1}; do
   echo "Lead: "$ll
-<<<<<<< HEAD
-#  python -u run_gp.py --lead $ll --model gpy --dtrain 125 --dval 7 --dstart 0 --dend 243
-=======
-  python -u run_gp.py --lead $ll --model gpy --dtrain 125 --dval 7 --dstart 60 --dend 243
-#   > "../lead"$ll".log" &
->>>>>>> b3771a6b806a54a59162c0b8b8c2e4347b472fa8
+#  python -u run_gp.py --lead $ll --model gpy --dtrain 125 --dval 7 --dstart 60 --dend 243
 done
 
 echo "(5) Compare the different approaches"
@@ -49,16 +44,7 @@ python run_eval.py
 echo "(6) Compare performance to escalation"
 python run_escalation.py
 
-#echo "(4) Fit Lasso model over various days"
-#if [ $loc != "mnt" ]; then
-#  echo "WE ARE ON HPF"
-#	#qsub -N local_lead4 -F "4" pipeline_HPF.sh
-#else
-#	echo "WE ARE ON LOCAL"
-#	for tt in {75..76..1}; do
-#    echo "Day: "$tt
-#    python run_mdl.py --day $tt --lead 4 --nlags 10 --model local
-#  done
-#fi
+echo "(7) Do granular model comparisons"
+python run_comp.py
 
 echo "END OF SCRIPT"
