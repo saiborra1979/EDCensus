@@ -93,12 +93,13 @@ gg_esc_share = (ggplot(act_esc, aes(x='doy', y='share', color='esc')) + theme_bw
                 scale_color_manual(name='Level',values=colz_esc))
 gg_esc_share.save(os.path.join(dir_figures, 'gg_esc_share.png'), height=6, width=10)
 
-tmp = pd.DataFrame({'x':dmin-pd.DateOffset(days=8),'y':[15,35,45,55], 'lbl':lblz})
+tmp = pd.DataFrame({'x':dmin-pd.DateOffset(days=15),'y':[18,34,43,55], 'lbl':lblz})
 gg_act_y = (ggplot(act_y, aes(x='date', y='y')) + theme_bw() +
-                geom_line(size=0.25,color='blue',alpha=0.75) + labs(y='Census') +
-                ggtitle('Max patients per hour') +
+                geom_line(size=0.25,color='blue',alpha=0.75) + labs(y='Max patients per hour') +
+                #ggtitle('Max patients per hour') +
                 theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90)) +
-                scale_x_datetime(breaks='1 month', date_labels='%b, %Y') +
+                scale_x_datetime(breaks='1 month', date_labels='%b, %Y',
+                                 limits=(dmin-pd.DateOffset(days=22),dmax)) +
             geom_hline(yintercept=31) + geom_hline(yintercept=38) + geom_hline(yintercept=48) +
             annotate('rect',xmin=dmin,xmax=dmax,ymin=0,ymax=31,fill='green',alpha=0.25)+
             annotate('rect',xmin=dmin,xmax=dmax,ymin=31,ymax=38,fill='#e8e409',alpha=0.25)+
@@ -106,7 +107,7 @@ gg_act_y = (ggplot(act_y, aes(x='date', y='y')) + theme_bw() +
             annotate('rect',xmin=dmin,xmax=dmax,ymin=48,ymax=act_y.y.max(),fill='red',alpha=0.25) +
             geom_text(aes(x='x',y='y',label='lbl',color='lbl'),data=tmp) +
             scale_color_manual(values=colz_esc) + guides(color=False))
-gg_act_y.save(os.path.join(dir_figures, 'gg_act_y.png'), height=5, width=15)
+gg_act_y.save(os.path.join(dir_figures, 'gg_act_y.png'), height=3, width=6)  #height=5, width=15
 
 ### TRANSITION PROBABILITIES
 tit = 'One-hour ahead empirical transition probability'
@@ -188,6 +189,18 @@ gg_sp_full = (ggplot(tmp, aes(x='lead', y='value', color='pred.astype(str)')) +
               scale_color_manual(name='Δ esclation',values=['black'] + colz_esc[1:], labels=lblz) +
               theme(legend_position=(0.5, -0.05),legend_direction='horizontal'))
 gg_sp_full.save(os.path.join(dir_figures, 'gg_sp_full.png'), height=5, width=13)
+# Make plot for precision
+gg_sp_full_prec = (ggplot(tmp.query('metric=="prec"'), aes(x='lead', y='value', color='pred.astype(str)')) +
+              theme_bw() + geom_point(size=2, position=posd) + ggtitle('95% CI uses beta method') +
+              scale_x_continuous(breaks=list(range(1,25,2))) +
+              labs(x='Forecasting lead', y='Precision') +
+              geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
+              scale_color_manual(name='Δ esclation',values=['black'] + colz_esc[1:], labels=lblz) +
+              theme(legend_position=(0.5, 0.3),legend_direction='horizontal',legend_background=element_blank()))
+gg_sp_full_prec.save(os.path.join(dir_figures, 'gg_sp_full_prec.png'), height=3, width=4)
+
+
+
 
 gg_sp_agg = (ggplot(tmp1, aes(x='lead', y='value', color='metric')) +
              theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
@@ -252,9 +265,12 @@ df_pr = df_pr.query('pred==1').pivot_table('value',['lead','lb'],'metric').reset
 gg_pr_curve = (ggplot(df_pr, aes(x='sens',y='prec',color='lead',group='lead')) +
                theme_bw() + geom_line() + labs(x='Recall',y='Precision') +
                geom_abline(slope=-1,intercept=1,linetype='--') +
-               scale_color_cmap(name='Horizon') +
-               scale_x_continuous(limits=[0,1])+scale_y_continuous(limits=[0,1]))
-gg_pr_curve.save(os.path.join(dir_figures, 'gg_pr_curve.png'), height=5, width=6)
+               scale_color_cmap(name='Lead') +
+               scale_x_continuous(limits=[0.0,0.8])+scale_y_continuous(limits=[0.5,1.0]) +
+               ggtitle('Δ>0 in escalation') +
+               theme(legend_direction='horizontal', legend_position=(0.7, 0.3),
+                     legend_background=element_blank(),legend_key_size=10))
+gg_pr_curve.save(os.path.join(dir_figures, 'gg_pr_curve.png'), height=3, width=4)  #height=5, width=6
 # gg_pr_curve = (ggplot(df_pr, aes(x='sens',y='prec',color='lb',group='lead')) +
 #                theme_bw() + geom_line() + labs(x='Recall',y='Precision') +
 #                facet_wrap('~lead',labeller=label_both) +

@@ -39,13 +39,34 @@ r2_iter = df_iter.assign(month=lambda x: x.date.dt.month).groupby(cn_gg+['date']
 # Average daily performance over the months
 r2_iter = r2_iter.assign(month=lambda x: x.date.dt.month).groupby(cn_gg+['month']).r2.mean().reset_index()
 r2_iter = r2_iter.pivot_table('r2',list(r2_iter.columns.drop(['r2','tt'])),'tt').assign(spread=lambda x: x.iterative - x.retrain).reset_index()
-#
-gg_iter_comp = (ggplot(r2_iter, aes(x='lead',y='spread',color='ntrain.astype(str)')) + theme_bw() +
-         geom_point(size=2) + facet_wrap('~month', labeller=label_both) +
-         labs(x='Forecasting lead',y='R-squared (Pretraining - No pretraining)') +
-         ggtitle('Monthly R2-performance by retraining strategy\nPretraining (iterative) dominates') +
-         scale_color_discrete(name='Training hours') +
-         scale_x_continuous(breaks=list(range(1,25))) +
-         geom_hline(yintercept=0,linetype='--'))
-gg_iter_comp.save(os.path.join(dir_figures, 'gg_iter_comp.png'), height=8, width=14)
+r2_iter_month = r2_iter.drop(columns='lead').groupby(['ntrain','month']).mean().reset_index()
+# Aggregate over all months
+r2_iter_agg = r2_iter.groupby(['ntrain','lead']).spread.mean().reset_index()
 
+# gg_iter_comp = (ggplot(r2_iter_month, aes(x='month',y='spread',color='ntrain.astype(str)')) + theme_bw() +
+#          geom_point(size=2,position=position_dodge(0.5)) +
+#          labs(x='Month',y='R-squared (Pretraining - No pretraining)') +
+#          ggtitle('Monthly R2-performance by retraining strategy\nPretraining (iterative) dominates\nDaily average over all leads') +
+#          scale_color_discrete(name='Training hours') +
+#          scale_x_continuous(breaks=list(range(0,13))) +
+#          geom_hline(yintercept=0,linetype='--'))
+# gg_iter_comp.save(os.path.join(dir_figures, 'gg_iter_comp.png'), height=5, width=7)
+
+# gg_iter_comp = (ggplot(r2_iter.query('ntrain==72'), aes(x='lead',y='spread',color='ntrain.astype(str)')) + theme_bw() +
+#          geom_point(size=2) + facet_wrap('~month', labeller=label_both) +
+#          labs(x='Forecasting lead',y='R-squared (Pretraining - No pretraining)') +
+#          ggtitle('Monthly R2-performance by retraining strategy\nPretraining (iterative) dominates') +
+#          scale_color_discrete(name='Training hours') +
+#          scale_x_continuous(breaks=list(range(1,25))) +
+#          geom_hline(yintercept=0,linetype='--'))
+# gg_iter_comp.save(os.path.join(dir_figures, 'gg_iter_comp.png'), height=8, width=14)
+
+tmp = r2_iter_agg.query('ntrain==72').reset_index(None, True)
+gg_iter_comp = (ggplot(tmp, aes(x='lead',y='spread')) +
+                theme_bw() + geom_point(size=2,color='blue') + geom_line() +
+                labs(x='Forecasting lead',y='R-squared (iterative - no pretraining)') +
+                ggtitle('Average over one-day-ahead R2') +
+                scale_color_discrete(name='Training hours') +
+                scale_x_continuous(breaks=list(range(1,25,2))) +
+                geom_hline(yintercept=0,linetype='--'))
+gg_iter_comp.save(os.path.join(dir_figures, 'gg_iter_comp.png'), height=3, width=4)

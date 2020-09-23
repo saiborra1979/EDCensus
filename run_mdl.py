@@ -47,6 +47,13 @@ dates = df_lead_lags.index.to_frame().astype(str).assign(date=lambda x:pd.to_dat
 lags = np.arange(nlags+1)
 leads = (np.arange(nlags)+1)
 
+# Get breakdown of feature types
+cn_list = pd.Series(df_lead_lags.columns.get_level_values(0).unique()[1:])
+# cn_list[cn_list.str.contains('arrived|discharged')].str.split('_',2,True).iloc[:,0].value_counts()
+cn_list[cn_list.str.contains('arrived')].str.split('_',2,True).iloc[:,0].value_counts()
+cn_list[~cn_list.str.contains('arrived|discharged')].str.split('_',2,True).iloc[:,0].value_counts()
+
+
 # Convert into X/y matrices
 yval = df_lead_lags.loc[:,idx[:,'lead_'+str(lead)]].values.flatten()
 Xmat = df_lead_lags.loc[:,idx[:,['lag_'+str(lag) for lag in lags]]].values

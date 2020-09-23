@@ -65,7 +65,7 @@ res_rest = res_rest.query('dates.isin(@date_intersect)',engine='python').reset_i
 #####################################
 # --- STEP 1: GP VS PARA MODELS --- #
 
-di_mdl = {'lasso': 'Lasso', 'local': 'Locally weighted', 'gpy': 'GP'}
+di_mdl = {'lasso': 'Lasso', 'local': 'Locally weighted', 'gpy': 'GPR'}
 cn_date = ['year', 'month', 'day']
 cn_perf = ['r2', 'rmse', 'conc']
 
@@ -105,9 +105,8 @@ leads_gp = leads_gp.sort_values(['metric','mu']).reset_index(None,True)
 months_gp = perf_gp.assign(month=lambda x: x.date.dt.month).groupby(cn_gp[:-1] + ['month','metric'])
 months_gp = months_gp.value.describe()[cn_desc].reset_index().rename(columns=di_desc)
 
-
 ####################################
-# --- STEP 4: ESCLATION LEVELS --- #
+# --- STEP 3: ESCLATION LEVELS --- #
 
 # Compare predicted level to current one, and calculate sensitivity/precision
 res_class_grpz = res_gp.drop(columns=cn_date + ['hour', 'se'])
@@ -176,9 +175,8 @@ gg_hour2 = (ggplot(y_mar2020, aes(x='y1',y='y',color='month')) +
             geom_abline(intercept=0,slope=1))
 gg_hour2.save(os.path.join(dir_figures, 'gg_hour2.png'), height=16, width=16)
 
-
 # #################################
-# # --- STEP 5: GP STATISTICS --- #
+# # --- STEP X: GP STATISTICS --- #
 #
 # # CI for missing value
 # res_gp = res_gp.assign(lb=lambda x: x.pred - norm.ppf(0.975) * x.se, ub=lambda x: x.pred + norm.ppf(0.975) * x.se)
@@ -233,24 +231,28 @@ gg_hour2.save(os.path.join(dir_figures, 'gg_hour2.png'), height=16, width=16)
 
 modian_n = perf_gp.ntrain.mode().values[0]
 modian_grp = grpz_gp.groups.mode().values[0]
+lead_sub = lead_intersect[0]
 
 di_metric = {'r2': 'R-squared', 'conc': 'Concordance', 'rmse': 'RMSE'}
 
 ### PARA VS BL-GP ###
 for metric in di_metric:
     print(metric)
-    tmp = r2_mdl.query('metric == @metric')
+    tmp = r2_mdl.query('metric == @metric & lead==@lead_sub')
     fn, lbl = 'gg_perf_' + metric + '.png', di_metric[metric]
-    title = 'Performance by model: ' + lbl + '\nOne-day-ahead predictions'
+    title = lbl + ': One-day-ahead prediction (' + str(lead_sub) + ' hour lead)'
+    # title = 'Performance by model: ' + lbl + '\nOne-day-ahead predictions'
     gg_tmp = (ggplot(tmp, aes(x='date', y='value', color='model')) +
               geom_point(size=0.1, alpha=0.5) + geom_line(alpha=0.5) +
               theme_bw() + labs(y=lbl) + scale_color_discrete(name='Model') +
               theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90),
-                    subplots_adjust={'wspace': 0.25}) +
-              ggtitle(title) + facet_wrap('lead', labeller=label_both, scales='free_y') +
+              legend_position=(0.7,0.3), subplots_adjust={'wspace': 0.25},
+              legend_background=element_blank()) +
+              ggtitle(title) +
               scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
               geom_line(aes(x='date', y='smooth', color='model')))
-    gg_tmp.save(os.path.join(dir_figures, fn), height=5, width=8)
+    # facet_wrap('lead', labeller=label_both, scales='free_y') +
+    gg_tmp.save(os.path.join(dir_figures, fn), height=3, width=5)
 
 ### GPs for different groups ###
 
@@ -282,7 +284,6 @@ gg_grpz.save(os.path.join(dir_figures, 'gg_grpz_leads.png'), height=6, width=18)
 # Repeat for differnt N
 tmp = grpz_gp.query('groups==@modian_grp').assign(ntrain=lambda x: x.ntrain.astype(str))
 tmp.ntrain = pd.Categorical(tmp.ntrain, pd.Series(np.sort(grpz_gp.ntrain.unique())).astype(str))
-
 gg_ntrain = (ggplot(tmp, aes(x='lead', y='med', color='ntrain')) +
            theme_bw() + geom_point() + geom_line() +
            facet_wrap('~metric', labeller=labeller(metric=di_metric), scales='free_y') +
@@ -292,6 +293,19 @@ gg_ntrain = (ggplot(tmp, aes(x='lead', y='med', color='ntrain')) +
            labs(y='Value', x='Forecasting lead') +
             scale_color_discrete(name='Training hours'))
 gg_ntrain.save(os.path.join(dir_figures, 'gg_ntrain_leads.png'), height=6, width=18)
+# Create a version with only the R2
+tmp = grpz_gp.query('groups==@modian_grp & metric=="r2"').assign(ntrain=lambda x: (x.ntrain/24).astype(int))
+tmp.ntrain = pd.Categorical(tmp.ntrain, pd.Series(np.sort(tmp.ntrain.unique())))
+gg_ntrain_r2 = (ggplot(tmp, aes(x='lead', y='med', color='ntrain')) +
+                theme_bw() + geom_point() + geom_line() +
+                scale_x_continuous(breaks=list(range(1, 25, 2))) +
+                labs(y='R-Squared', x='Forecasting lead') +
+                scale_color_discrete(name='Training days') +
+                ggtitle('Average over one-day-ahead forecasts') +
+                theme(legend_position='right',legend_text=element_text(size=10),
+                      legend_key=element_rect(fill='white',color='white'),legend_key_height=0.5))
+gg_ntrain_r2.save(os.path.join(dir_figures, 'gg_ntrain_leads_r2.png'), height=3, width=4.5)
+
 
 ### GPs perf by group/N over months ###
 tmp = months_gp.query('ntrain==@modian_n')
