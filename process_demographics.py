@@ -148,7 +148,7 @@ dat_clin['temp'] = np.where(tmp == '', np.NaN, tmp).astype(float)
 # force respitory rate and pulse to reasonable values
 pulse, resp = dat_clin.pulse, dat_clin.resp
 resp[~((resp > 0) & (resp < 80))] = np.NaN
-pulse[~((pulse > 20) & (pulse < 200))] = np.NaN
+pulse[~((pulse >= 20) & (pulse <= 220))] = np.NaN
 
 # convert blood pressure to Systolic/Diastolic measures
 tmp_sys_dis = dat_clin.BP.str.replace('\\(.\\)\\s','')
@@ -178,7 +178,9 @@ dat_clin = dat_clin.merge(tmp[['CSN','dhours']],'left','CSN')
 dat_clin['ret72'] = (dat_clin.dhours < 72).astype(int)
 
 # Aggregate sex
-dat_clin['sex'] = np.where(dat_clin.sex == 'U', 'F', dat_clin.sex)
+print(dat_clin.sex.value_counts())
+dat_clin['sex'] = np.where(dat_clin.sex == 'U', np.random.choice(['M','F'],dat_clin.shape[0]),dat_clin.sex)
+print(dat_clin.sex.value_counts())
 
 # Fill missing numeric with means
 cn_num = ['age','weight','pulse','resp','temp','num_meds','systolic','diastolic']
@@ -195,12 +197,13 @@ assert dat_clin[cn_fac].notnull().all().all()
 
 # Arrival method
 dat_clin['arr_method'] = dat_clin.arr_method.str.split('\\s\\(',1,True).iloc[:,0]
-di_arr = {'Ambulatory':'Ambulanace', 'Land Ambulance':'Ambulance',
+di_arr = {'Ambulatory':'Ambulance', 'Land Ambulance':'Ambulance',
           'Transfer In':'Transfer', 'missing':'Other',
           'Air Ambulance':'Air', 'Air & Ground Ambulance':'Air',
           'Walk':'Walk', 'Car':'Car', 'Other':'Other',
           'Unknown':'Other', 'Helicopter':'Air',
           'Police':'Other', 'Bus':'Car', 'Taxi':'Car', 'Stretcher':'Other'}
+print(np.unique(list(di_arr.values())))
 assert dat_clin.arr_method.isin(list(di_arr)).all()
 
 # Languages
