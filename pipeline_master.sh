@@ -16,8 +16,11 @@ elif [ "$loc" == "erik" ]; then
 elif [ "$loc" == "largeprojects" ]; then
 	echo "WE ARE ON HPF"
 	cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow || return
-	. conda.env
-	source activate CensusFlow
+  which python
+  module load python/3.8.1
+  fold_env="/hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate"
+  . $fold_env
+  which python
 else
   echo "where are we?!"
   return
