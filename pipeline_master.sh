@@ -23,11 +23,13 @@ else
   return
 fi
 
+#source transfer_csv.sh sep 2020
+
 echo "(1) Get the demographic data"
-#python process_demographics.py
+python process_demographics.py
 
 echo "(2) Generate the Xy matrix"
-#python process_flow.py --bfreq "1 hour" --ylbl "census_max" --nlags 10
+python process_flow.py --bfreq "1 hour" --ylbl "census_max" --nlags 10
 
 echo "(3) Get descriptive statistics"
 #python explore_AR.py
@@ -39,12 +41,12 @@ for ll in {1..24..1}; do
 done
 
 echo "(5) Compare the different approaches"
-python run_eval.py
+#python run_eval.py
 
 echo "(6) Compare performance to escalation"
-python run_escalation.py
+#python run_escalation.py
 
 echo "(7) Do granular model comparisons"
-python run_comp.py
+#python run_comp.py
 
 echo "END OF SCRIPT"
