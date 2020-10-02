@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# example of use: source transfer_csv.sh sep 2020
+
 loc=$(pwd | cut -d'/' -f3)
 
 if [ "$loc" == "largeprojects" ]; then
@@ -9,12 +11,13 @@ mv $dir_pulls/labs*.csv $dir_pulls/labs
 mv $dir_pulls/DI*.csv $dir_pulls/DI
 mv $dir_pulls/clin*.csv $dir_pulls/triage_clin
 mv $dir_pulls/triage*.csv $dir_pulls/triage_notes
+fi
 
-else
-  echo "We are on predator or snow queen"
+if [ "$loc" == "c" ]; then
+  echo "We are on predator"
 dir_pulls=/mnt/c/Users/erik\ drysdale/Documents/projects/ED/pulls
 dir_hpf="edrysdale@data.ccm.sickkids.ca:/hpf/largeprojects/agoldenb/edrysdale/ED/pulls"
-
+dir_snow=erik@snowqueen.sickkids.ca:/home/erik/Documents/projects/ED/master/pulls
 # the most recent month
 month=${1}
 year=${2}
@@ -31,5 +34,15 @@ du -sh "$path2"
 du -sh "$path3"
 du -sh "$path4"
 
-scp "$path1" "$path2" "$path3" "$path4" $dir_hpf
+#scp "$path1" "$path2" "$path3" "$path4" $dir_hpf
+scp "$path1" "$path2" "$path3" "$path4" $dir_snow
+fi
+
+if [ "$loc" == "erik" ]; then
+  echo "We are on predator on snowqueen"
+dir_pulls=/home/erik/Documents/projects/ED/master/pulls
+mv $dir_pulls/labs*.csv $dir_pulls/labs
+mv $dir_pulls/DI*.csv $dir_pulls/DI
+mv $dir_pulls/clin*.csv $dir_pulls/triage_clin
+mv $dir_pulls/triage*.csv $dir_pulls/triage_notes
 fi
