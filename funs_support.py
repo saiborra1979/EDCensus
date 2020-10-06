@@ -4,16 +4,105 @@ import numpy as np
 import pandas as pd
 import itertools
 from math import radians, cos, sin, asin, sqrt
+from statsmodels.stats.proportion import proportion_confint as propCI
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
-
 from sklearn.metrics import r2_score as r2
 from sklearn.metrics import mean_squared_error as mse
 
 import multiprocessing
+from itertools import repeat
 
-from statsmodels.stats.proportion import proportion_confint as propCI
+from scipy.stats import norm
+
+def get_level(groups, target, gg):
+    cn = groups[0]
+    df = groups[1]
+    out = pd.DataFrame(cn).T.assign(level=find_prec(df, target, gg))
+    return out
+
+# data=res_rest.copy();gg=cn_multi;n_cpus=10
+def parallel_find_prec(data, gg, target, n_cpus=None):
+    data_split = data.groupby(gg)
+    if n_cpus is None:
+        n_cpus = os.cpu_count()-1
+    print('Number of CPUs: %i' % n_cpus)
+    pool = multiprocessing.Pool(processes=n_cpus)
+    data = pd.concat(pool.starmap(get_level, zip(data_split, repeat(target), repeat(gg))))
+    pool.close()
+    pool.join()
+    return data
+
+
+# Function that will apply ordinal_lbls() until it finds the precision target
+# df = res_train.copy(); gg=['month']
+def ret_prec(level, df, gg, ret_df=False):
+    cn_sign = ['pred', 'y']
+    dat2ord = ordinal_lbls(df.copy(), level=level)
+    dat2ord[cn_sign] = np.sign(dat2ord[cn_sign])
+    prec = sens_spec_df(df=dat2ord, gg=gg)
+    if ret_df:
+        return prec
+    else:
+        prec = prec.query('pred==1 & metric=="prec"').value.values[0]
+    return prec
+
+# df=res_train.copy(); target=0.8; gg=['month']
+def find_prec(df, target, gg, tol=0.005, max_iter=50):
+    level_lb, level_mid, level_ub = 0.01, 0.5, 0.99
+    prec_lb, prec_mid, prec_ub = ret_prec(level_lb, df=df, gg=gg), ret_prec(level_mid, df=df, gg=gg), ret_prec(level_ub, df=df, gg=gg)
+    for tick in range(max_iter):
+        if target < prec_mid:
+            #print('Mid becomes top')
+            level_lb, level_mid, level_ub = level_lb, level_lb+(level_mid-level_lb)/2, level_mid
+        else:
+            #print('Mid becomes bottom')
+            level_lb, level_mid, level_ub = level_mid, level_mid+(level_ub-level_mid)/2, level_ub
+        prec_lb = ret_prec(level_lb, df=df, gg=gg)
+        prec_mid = ret_prec(level_mid, df=df, gg=gg)
+        prec_ub = ret_prec(level_ub, df=df, gg=gg)
+        err_lb, err_mid, err_ub = np.abs(prec_lb-target), np.abs(prec_mid-target), np.abs(prec_ub-target)
+        err = min(err_lb, err_mid, err_ub)
+        # print('lb: %0.2f (%0.3f), mid: %0.2f (%0.3f), ub: %0.2f (%0.3f)' %
+        #       (level_lb, prec_lb, level_mid, prec_mid, level_ub, prec_ub))
+        if err < tol:
+            #print('Tolerance met')
+            break
+    di_level = {'lb':level_lb, 'mid':level_mid, 'ub':level_ub}
+    tt = pd.DataFrame({'tt':['lb','mid','ub'],'err':[err_lb, err_mid, err_ub]}).sort_values('err').tt.values[0]
+    level_star = di_level[tt]
+    return level_star
+
+# df=res_train.copy(); level=0.5
+def ordinal_lbls(df, level=0.5):
+    """
+    Function to get ordinal labels for different lower-bounds of the CI
+    """
+    # Columns that df must mave
+    cn_res = ['y_pred', 'hat_pred', 'se', 'y_rt', 'date_rt', 'date_pred']
+    assert len(np.setdiff1d(cn_res, df.columns)) == 0
+    # Apply lower-bound of the level
+    assert (level > 0) & (level < 1)
+    crit = norm.ppf(level)
+    df['hat_pred'] = df.hat_pred - crit*df.se
+    # Make the cuts
+    cn_pred = ['y_rt', 'y_pred', 'hat_pred']
+    ymx = max(df[cn_pred].max().max() + 1, 49)
+    ymi = min(df[cn_pred].min().min() - 1, -1)
+    esc_bins = [ymi, 31, 38, 48, ymx]
+    esc_lbls = ['≤30', '31-37', '38-47', '≥48']
+    df[cn_pred] = df[cn_pred].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
+    # Drop se columns and get remaining groupings
+    df.drop(columns=['se'],inplace=True)
+    cn_gg = list(np.setdiff1d(df.columns, cn_pred+['date_rt','date_pred']))
+    assert len(cn_gg) >= 1
+    df = df.melt(cn_gg + ['date_rt', 'y_rt'], ['y_pred', 'hat_pred'], 'tt', 'value')
+    df['delta'] = df.value - df.y_rt
+    df = df.pivot_table('delta', cn_gg + ['date_rt', 'y_rt'], 'tt').reset_index()
+    df.rename(columns={'hat_pred': 'pred', 'y_pred': 'y'}, inplace=True)
+    return df
+
 
 def gg_color_hue(n):
     from colorspace.colorlib import HCL

@@ -107,7 +107,7 @@ gg_act_y = (ggplot(act_y, aes(x='date', y='y')) + theme_bw() +
             annotate('rect',xmin=dmin,xmax=dmax,ymin=48,ymax=act_y.y.max(),fill='red',alpha=0.25) +
             geom_text(aes(x='x',y='y',label='lbl',color='lbl'),data=tmp) +
             scale_color_manual(values=colz_esc) + guides(color=False))
-gg_act_y.save(os.path.join(dir_figures, 'gg_act_y.png'), height=3, width=6)  #height=5, width=15
+gg_act_y.save(os.path.join(dir_figures, 'gg_act_y.png'), height=5, width=15)  #height=3, width=6
 
 ### TRANSITION PROBABILITIES
 tit = 'One-hour ahead empirical transition probability'
