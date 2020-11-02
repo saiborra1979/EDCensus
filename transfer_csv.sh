@@ -34,12 +34,12 @@ du -sh "$path2"
 du -sh "$path3"
 du -sh "$path4"
 
-#scp "$path1" "$path2" "$path3" "$path4" $dir_hpf
+scp "$path1" "$path2" "$path3" "$path4" $dir_hpf
 scp "$path1" "$path2" "$path3" "$path4" $dir_snow
 fi
 
 if [ "$loc" == "erik" ]; then
-  echo "We are on predator on snowqueen"
+  echo "We are on snowqueen"
 dir_pulls=/home/erik/Documents/projects/ED/master/pulls
 mv $dir_pulls/labs*.csv $dir_pulls/labs
 mv $dir_pulls/DI*.csv $dir_pulls/DI

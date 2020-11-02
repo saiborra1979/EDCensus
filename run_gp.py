@@ -19,7 +19,7 @@ if hasattr(args, 'groups'):
     groups = args.groups
 
 # # Debugging in PyCharm (78==March 19th)
-# lead, model, dstart, dend, groups, dtrain, dval = 1, 'gpy', 0, 10, ['CTAS'], 125, 7
+# lead, model, dstart, dend, groups, dtrain, dval = 1, 'gpy', 0, 10, ['CTAS'], 3, 7
 
 import os
 import sys
@@ -71,6 +71,13 @@ tmat = dates.index.droplevel([0, 1]).to_frame(False).reset_index().rename(column
 Xmat = np.hstack([tmat.values, Xmat])
 cn = list('date_' + tmat.columns) + cn
 assert len(cn) == Xmat.shape[1]
+
+if groups is None:
+    sgroups = str(groups)
+else:
+    sgroups = '-'.join(groups)
+# For saving: day start/end/# training days/groups
+suffix = '_dstart_' + str(dstart) + '_dend_' + str(dend) + '_dtrain_' + str(dtrain)  + '_groups_' + sgroups
 
 ################################################
 # --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #
@@ -127,6 +134,8 @@ for day, s_test in enumerate(d_pred):
     gp.tune(max_iter=1000, lr=0.01)
     torch.cuda.empty_cache()
     holder_state = gp.gp.state_dict().copy()
+    fn_state = gp.fn.replace('.pkl',suffix+'_day_'+s_test.strftime('%Y%m%d')+'.pth')
+    torch.save(holder_state, os.path.join(dir_save,fn_state))
     res = gp.predict(X=Xmat_test, y=y_test)
     res = res.assign(date=s_test).rename_axis('hour').reset_index()
     holder.append(res)
@@ -138,11 +147,7 @@ for day, s_test in enumerate(d_pred):
 # --- STEP 3: SAVE PREDICTIONS --- #
 
 fn_res = gp.fn.replace('mdl_', 'res_')
-if groups is None:
-    sgroups = str(groups)
-else:
-    sgroups = '-'.join(groups)
-fn_res = fn_res.replace('.pkl', '_dstart_' + str(dstart) + '_dend_' + str(dend) + '_dtrain_' + str(dtrain)  + '_groups_' + sgroups + '.csv')
+fn_res = fn_res.replace('.pkl', suffix + '.csv')
 df_res = pd.concat(holder).reset_index(None, True).rename(columns={'mu': 'pred'})
 df_res = df_res.assign(lead=lead, model=model, groups=sgroups, ntrain=ntrain)
 df_res.to_csv(os.path.join(dir_save, fn_res), index=False)
