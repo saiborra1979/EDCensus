@@ -52,7 +52,6 @@ act_y = act_y.query('date >= @dmin').reset_index(None,True).assign(doy2=lambda x
 ##################################
 # --- (2) GET ORDINAL LABELS --- #
 
-
 di_acty = {'y': 'y_rt', 'date': 'date_rt'}
 di_res = {'date': 'date_rt', 'y': 'y_pred', 'pred': 'hat_pred'}
 res = res.rename(columns=di_res).merge(act_y.rename(columns=di_acty)[list(di_acty.values())],'left','date_rt')
@@ -153,6 +152,7 @@ for month in month_seq:
 # Combine and save
 dat_level_sim = pd.concat(holder_month)
 dat_level_sim.to_csv(os.path.join(dir_flow, 'dat_level_sim.csv'), index=False)
+dat_level_sim = pd.read_csv(os.path.join(dir_flow, 'dat_level_sim.csv'))
 
 gg_level_sim = (ggplot(dat_level_sim, aes(x='1-level')) + theme_bw() +
                 geom_histogram(bins=30,fill='grey',color='red') +
@@ -165,7 +165,7 @@ gg_level_sim.save(os.path.join(dir_figures, 'gg_level_sim.png'),height=7,width=9
 # Conservative estimate
 month_test = max(month_seq) + 1
 level_cons = dat_level_sim.groupby('month').apply(lambda x: np.quantile(x.level,type1)).max()
-dat_month_test = res_prec.query('month == @month_test')
+dat_month_test = res_prec.query('month >= @month_test')
 
 # Simulate and compare
 pr_month_test = ret_prec(level_cons, dat_month_test, ['month'], True).query('pred==1').reset_index(None, True)
@@ -176,13 +176,14 @@ for ii in range(nsim):
     holder_sim.append(tmp.assign(sim=ii))
 dat_pr_sim = pd.concat(holder_sim).reset_index(None, True)
 
-tmp1 = dat_pr_sim.pivot_table('value','sim','metric').reset_index()
+tmp1 = dat_pr_sim.pivot_table('value',['sim','month'],'metric').reset_index()
 tmp2 = pr_month_test.pivot('month','metric','value').reset_index()
 gg_pr_sim = (ggplot(tmp1, aes(x='sens',y='prec')) + theme_bw() +
              geom_point(color='blue',alpha=0.5,size=0.5) + labs(x='Recall',y='Precision') +
              geom_point(aes(x='sens',y='prec'),data=tmp2,color='black',size=2) +
-             ggtitle('PR on September 2020\nBootstrapped samples in blue'))
-gg_pr_sim.save(os.path.join(dir_figures, 'gg_pr_sim.png'),height=4,width=5)
+             ggtitle('PR on September 2020\nBootstrapped samples in blue') +
+             facet_wrap('~month',labeller=label_both) + scale_y_continuous(limits=[0.9,1.0]))
+gg_pr_sim.save(os.path.join(dir_figures, 'gg_pr_sim.png'),height=4,width=8)
 
 
 #################################
