@@ -191,16 +191,14 @@ gg_sp_full = (ggplot(tmp, aes(x='lead', y='value', color='pred.astype(str)')) +
 gg_sp_full.save(os.path.join(dir_figures, 'gg_sp_full.png'), height=5, width=13)
 # Make plot for precision
 gg_sp_full_prec = (ggplot(tmp.query('metric=="prec"'), aes(x='lead', y='value', color='pred.astype(str)')) +
-              theme_bw() + geom_point(size=2, position=posd) + ggtitle('95% CI uses beta method') +
+              theme_bw() + geom_point(size=2, position=posd)  +
               scale_x_continuous(breaks=list(range(1,25,2))) +
               labs(x='Forecasting lead', y='Precision') +
               geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
               scale_color_manual(name='Δ esclation',values=['black'] + colz_esc[1:], labels=lblz) +
               theme(legend_position=(0.5, 0.3),legend_direction='horizontal',legend_background=element_blank()))
+# + ggtitle('Exact 95% CI from binomial quantiles')
 gg_sp_full_prec.save(os.path.join(dir_figures, 'gg_sp_full_prec.png'), height=3, width=4)
-
-
-
 
 gg_sp_agg = (ggplot(tmp1, aes(x='lead', y='value', color='metric')) +
              theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
@@ -252,6 +250,7 @@ for p in p_seq:
     tmp = best_ypred.drop(columns=cn_ymdh).assign(lb=lambda x: x.pred-crit*x.se).drop(columns=['pred','se']).rename(columns={'y':'y_pred', 'lb':'pred', 'dates':'date'})
     print(np.mean(tmp.y_pred > tmp.pred))
     tmp = tmp.merge(act_y[['y', 'date']]).rename(columns={'y':'y_rt', 'date':'date_rt','y_pred':'y'})
+    tmp = tmp.sort_values(['lead', 'date_rt']).reset_index(None, True)
     cn = ['y','y_rt','pred']
     tmp[cn] = tmp[cn].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
     assert np.all(tmp.y_rt.value_counts() == best_ylbl.y_rt.value_counts())
@@ -266,8 +265,8 @@ gg_pr_curve = (ggplot(df_pr, aes(x='sens',y='prec',color='lead',group='lead')) +
                theme_bw() + geom_line() + labs(x='Recall',y='Precision') +
                geom_abline(slope=-1,intercept=1,linetype='--') +
                scale_color_cmap(name='Lead') +
-               scale_x_continuous(limits=[0.0,0.8])+scale_y_continuous(limits=[0.5,1.0]) +
-               ggtitle('Δ>0 in escalation') +
+               scale_x_continuous(limits=[0.0,1.0])+scale_y_continuous(limits=[0.5,1.0]) +
+               # ggtitle('Δ>0 in escalation') +
                theme(legend_direction='horizontal', legend_position=(0.7, 0.3),
                      legend_background=element_blank(),legend_key_size=10))
 gg_pr_curve.save(os.path.join(dir_figures, 'gg_pr_curve.png'), height=3, width=4)  #height=5, width=6

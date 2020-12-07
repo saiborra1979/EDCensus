@@ -13,8 +13,9 @@ dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 # Get the dates associated with the test output
 dates = pd.Series(os.listdir(dir_test))
-dates = dates[dates.str.contains('^[0-9]{4}')].reset_index(None,True)
+dates = dates[dates.str.contains('^[0-9]{4}\\_[0-9]{2}\\_[0-9]{2}$')].reset_index(None,True)
 print(dates)
+dates = '2020_09_01'  # hard code the test folder
 
 ##################################
 # --- STEP 1: AGGREGATE DATA --- #

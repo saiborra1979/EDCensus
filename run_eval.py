@@ -246,8 +246,8 @@ for metric in di_metric:
               geom_point(size=0.1, alpha=0.5) + geom_line(alpha=0.5) +
               theme_bw() + labs(y=lbl) + scale_color_discrete(name='Model') +
               theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90),
-              legend_position=(0.7,0.3), subplots_adjust={'wspace': 0.25},
-              legend_background=element_blank()) +
+              legend_position=(0.60,0.80), subplots_adjust={'wspace': 0.25},
+              legend_background=element_blank(),legend_direction='horizontal') +
               ggtitle(title) +
               scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
               geom_line(aes(x='date', y='smooth', color='model')))
