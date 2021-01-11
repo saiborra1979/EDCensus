@@ -3,16 +3,17 @@ import os
 import numpy as np
 import pandas as pd
 
-from funs_support import vhaversine, pc_extract
+from funs_support import vhaversine, pc_extract, find_dir_olu
 
 dir_base = os.getcwd()
-dir_data = os.path.join(dir_base, '..', 'data')
-dir_pulls = os.path.join(dir_base, '..', 'pulls')
-dir_figures = os.path.join(dir_base, '..', 'figures')
+dir_olu = find_dir_olu()
+dir_data = os.path.join(dir_olu, 'data')
+dir_pulls = os.path.join(dir_olu, 'pulls')
+dir_figures = os.path.join(dir_olu, 'figures')
 dir_clin = os.path.join(dir_pulls, 'triage_clin')
-lst_dir = [dir_data, dir_pulls, dir_clin]
+lst_dir = [dir_data, dir_pulls, dir_clin, dir_figures]
 assert all([os.path.exists(z) for z in lst_dir])
-dir_output = os.path.join(dir_base, '..', 'output')
+dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 folders = [dir_output, dir_flow]
 for dd in folders:

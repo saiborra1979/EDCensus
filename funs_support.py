@@ -1,5 +1,7 @@
 import re
 import os
+import sys
+import socket
 import numpy as np
 import pandas as pd
 import itertools
@@ -15,6 +17,30 @@ import multiprocessing
 from itertools import repeat
 
 from scipy.stats import norm
+
+
+def find_dir_olu():
+    dir_base = os.getcwd()
+    cpu = socket.gethostname()
+    # Set directory based on CPU name
+    if cpu == 'RT5362WL-GGB':
+        if os.name == 'nt':  # In windows
+            dir_olu = 'D:\\projects\\ED'
+        elif os.name == 'posix':  # on WSL
+            dir_olu = '/mnt/d/projects/ED'
+        else:
+            sys.exit('Huh?! I dont recognize this operating system')
+        print('On predator machine')
+    elif cpu == 'snowqueen':
+        print('On snowqueen machine')
+        dir_olu = os.path.join(dir_base, '..')
+    elif pd.Series(cpu).str.contains('qlogin')[0]:
+        print('On HPF')
+        dir_olu = os.path.join(dir_base, '..')
+    else:
+        sys.exit('Where are we?!')
+    return dir_olu
+
 
 def get_level(groups, target, gg):
     cn = groups[0]
