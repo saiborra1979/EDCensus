@@ -29,19 +29,22 @@ from time import time
 from mdls.gpy import mdl
 import torch
 from datetime import datetime
-from funs_support import makeifnot
+from funs_support import makeifnot, find_dir_olu
 import gpytorch
 
 # from sklearn.metrics import r2_score
 
 dir_base = os.getcwd()
-dir_figures = os.path.join(dir_base, '..', 'figures')
-dir_output = os.path.join(dir_base, '..', 'output')
+dir_olu = find_dir_olu()
+dir_figures = os.path.join(dir_olu, 'figures')
+dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 dir_save = os.path.join(dir_test, datetime.now().strftime('%Y_%m_%d'))
+dir_save_pt = os.path.join(dir_save, 'pt')
 makeifnot(dir_test)
 makeifnot(dir_save)
+makeifnot(dir_save_pt)
 
 idx = pd.IndexSlice
 use_cuda = torch.cuda.is_available()
@@ -135,7 +138,7 @@ for day, s_test in enumerate(d_pred):
     torch.cuda.empty_cache()
     holder_state = gp.gp.state_dict().copy()
     fn_state = gp.fn.replace('.pkl',suffix+'_day_'+s_test.strftime('%Y%m%d')+'.pth')
-    torch.save(holder_state, os.path.join(dir_save,fn_state))
+    torch.save(holder_state, os.path.join(dir_save_pt,fn_state))
     res = gp.predict(X=Xmat_test, y=y_test)
     res = res.assign(date=s_test).rename_axis('hour').reset_index()
     holder.append(res)
