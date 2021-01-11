@@ -18,10 +18,12 @@ from itertools import repeat
 
 from scipy.stats import norm
 
-
 def find_dir_olu():
     dir_base = os.getcwd()
     cpu = socket.gethostname()
+    print(cpu)
+    hpf1 = pd.Series(cpu).str.contains('qlogin')[0]
+    hpf2 = pd.Series(cpu).str.contains('node')[0]
     # Set directory based on CPU name
     if cpu == 'RT5362WL-GGB':
         if os.name == 'nt':  # In windows
@@ -34,7 +36,7 @@ def find_dir_olu():
     elif cpu == 'snowqueen':
         print('On snowqueen machine')
         dir_olu = os.path.join(dir_base, '..')
-    elif pd.Series(cpu).str.contains('qlogin')[0]:
+    elif hpf1 or hpf2:
         print('On HPF')
         dir_olu = os.path.join(dir_base, '..')
     else:
