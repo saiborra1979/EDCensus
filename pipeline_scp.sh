@@ -20,14 +20,27 @@ if [ -d $dir_pulls ]; then
   # Zip all the files
   if [ $loc == "c" ]; then
     zip -r --junk-path $dir_pulls/pulls.zip $dir_pulls/*
-    scp $dir_pulls/pulls.zip erik@snowqueen.sickkids.ca:/home/erik/Documents/projects/ED/master
-    scp $dir_pulls/pulls.zip edrysdale@data.ccm.sickkids.ca:/hpf/largeprojects/agoldenb/edrysdale/ED
+    scp $dir_pulls/pulls.zip erik@snowqueen.sickkids.ca:/home/erik/Documents/projects/ED/master/pulls
+    scp $dir_pulls/pulls.zip edrysdale@data.ccm.sickkids.ca:/hpf/largeprojects/agoldenb/edrysdale/ED/pulls
   fi
   if [ $loc == "erik" ] || [ $loc == "largeprojects" ]; then
     # Unzip the files (temporary)
-    #unzip -o ../pulls.zip -d ../
-    #chmod 700 ../pulls*
-    #rm -r ../pulls
+    unzip ../pulls/pulls.zip -d ../pulls/
+    prefix="clin DI labs triage_notes"
+    for pref in $prefix; do
+      echo $pref
+      fns=$(ls ../pulls/ | grep $pref"_" | grep .csv$)
+      for fn in $fns; do
+        if [ $pref == "clin" ]; then
+          fold="triage_clin"
+        else
+          fold=$pref
+        fi
+        echo $fold
+        mv ../pulls/$fn ../pulls/$fold
+      done
+    done
+    #rm ../pulls/pulls.zip
   fi
 else
   echo "pulls folder does not exist!"
