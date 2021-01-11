@@ -18,7 +18,7 @@ TOP_LEVEL_FOLDER
 For example you can download the most recent output and .pt files here:
 /hpf/largeprojects/agoldenb/edrysdale/ED/output/flow/test/2021_01_11
 
-python ex_run_mdl.py --lead 10 --mdl_date 2020-09-07 --groups mds arr CTAS
+python padmanie/ex_run_mdl.py --lead 10 --mdl_date 2020-09-07 --groups mds arr CTAS
 """
 
 import argparse
@@ -41,6 +41,7 @@ dir_base = os.getcwd()
 import sys
 
 sys.path.insert(0, os.path.join(dir_base, '..'))
+sys.path.insert(0,os.path.join(dir_base))
 
 from funs_support import find_dir_olu
 import numpy as np
@@ -62,7 +63,8 @@ dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 # Find the most recent date
 fn_test = pd.Series(os.listdir(dir_test))
-fn_test = fn_test[fn_test.str.contains('^[0-9]{4}')].reset_index(None, True)
+fn_test = fn_test[fn_test.str.contains('^[0-9]{4}')].reset_index(None,True)
+fn_test = fn_test[fn_test.str.contains('[0-9]{2}$')].reset_index(None, True)
 fn_test = pd.to_datetime(fn_test.str.replace('\\_', '-'))
 fn_test = fn_test[fn_test.idxmax()]
 print('Most recent model rune date is: %s' % fn_test.strftime('%b %d, %Y'))
