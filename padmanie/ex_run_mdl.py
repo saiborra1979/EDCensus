@@ -17,7 +17,7 @@ TOP_LEVEL_FOLDER
 ---------------pt
 ------------------[saved model weights]
 
-For example you can download the most recent output and .pt files here:
+For example you can download the most recent output and .pt files here
 /hpf/largeprojects/agoldenb/edrysdale/ED/output/flow/test/2021_01_11
 
 python padmanie/ex_run_mdl.py --lead 10 --mdl_date 2020-09-07 --groups mds arr CTAS
