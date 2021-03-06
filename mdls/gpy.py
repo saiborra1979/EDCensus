@@ -187,7 +187,7 @@ class mdl():
             # Append on test set
             if y is not None:
                 self.gp.set_train_data(inputs=torch.cat([self.gp.train_inputs[0],xslice]),
-                                       targets=torch.cat([self.gp.train_targets, ytil[[i]]]),strict=False)
+                                    targets=torch.cat([self.gp.train_targets, ytil[[i]]]),strict=False)
         res = pd.DataFrame(res, columns=cn)
         # Transform back to original scale (not we only need se to be multipled by sig from (X-mu)/sig
         res['mu'] = self.encY.inverse_transform(res.mu)
@@ -196,6 +196,37 @@ class mdl():
             res.insert(0,'y',y)
             print('Test set R2: %0.3f' % r2_score(res.y, res.mu))
         return res
+
+    def predict_arr(self, X, y=None):
+        assert self.isfit & self.istrained
+        Xtil = torch.tensor(self.encX.transform(X[:,self.cidx.idx.values]),dtype=torch.float32).to(self.device)
+        if y is not None:
+            ytil = torch.tensor(self.encY.transform(y),dtype=torch.float32).to(self.device)
+        ntest = Xtil.shape[0]
+        cn = ['mu', 'se']
+        self.gp.eval()
+        self.likelihood.eval()
+        res = np.zeros([ntest, 2])
+        for i in range(ntest):
+            xslice = Xtil[[i]]
+            with torch.no_grad(), gpytorch.settings.max_cg_iterations(10000):
+                pred = self.gp(xslice)  #self.likelihood()
+            res[i] = [pred.mean.item(), pred.stddev.item()]
+            # Append on test set
+            if y is not None:
+                self.gp.set_train_data(inputs=torch.cat([self.gp.train_inputs[0],xslice]),
+                                    targets=torch.cat([self.gp.train_targets, ytil[[i]]]),strict=False)
+        res = pd.DataFrame(res, columns=cn)
+        # Transform back to original scale (not we only need se to be multipled by sig from (X-mu)/sig
+        res['mu'] = self.encY.inverse_transform(res.mu)
+        res['se'] = res.se * self.encY.enc.scale_
+        if y is not None:
+            res.insert(0,'y',y)
+            print('Test set R2: %0.3f' % r2_score(res.y, res.mu))
+        output_arr = np.asarray(res['mu'])
+        print("output array:")
+        print(output_arr)
+        return output_arr
 
         # tmp = pd.concat([self.res_train.drop(columns=['se','idx']), res.assign(tt='test')])
         # tmp = tmp.reset_index(None, True).rename_axis('idx').reset_index()
