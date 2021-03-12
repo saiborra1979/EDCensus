@@ -12,9 +12,11 @@ from scipy.stats import norm
 from time import time
 from sklearn.metrics import r2_score
 
+
 dir_base = os.getcwd()
-dir_figures = os.path.join(dir_base, '..', 'figures')
-dir_output = os.path.join(dir_base, '..', 'output')
+dir_olu = find_dir_olu()
+dir_figures = os.path.join(dir_olu, 'figures')
+dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 
 # Load all model results

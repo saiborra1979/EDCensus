@@ -25,8 +25,9 @@ import pandas as pd
 from sklearn.metrics import r2_score
 
 dir_base = os.getcwd()
-dir_figures = os.path.join(dir_base, '..', 'figures')
-dir_output = os.path.join(dir_base, '..', 'output')
+dir_olu = find_dir_olu()
+dir_figures = os.path.join(dir_olu, 'figures')
+dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 if not os.path.exists(dir_test):

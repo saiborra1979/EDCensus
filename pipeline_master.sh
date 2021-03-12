@@ -28,6 +28,9 @@ fi
 
 #source transfer_csv.sh sep 2020
 
+echo "(0) Doing exploratory analysis"
+python run_exploratory.py
+
 echo "(1) Get the demographic data"
 python process_demographics.py
 
