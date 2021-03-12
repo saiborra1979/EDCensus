@@ -80,9 +80,13 @@ def first2names(x):
 u_names = pd.Series(df.query('date<"2021-03-01"').name.unique())
 u_names = u_names[u_names.notnull()].reset_index(None, True)
 all_names = pd.Series(dat_clin.name.unique())
-u_names = first2names(u_names)
+u_names = pd.Series(first2names(u_names).unique())
 all_names = pd.Series(first2names(all_names).unique())
 assert len(np.setdiff1d(u_names,all_names)) == 0
+
+dat_sub = dat_clin.assign(name=lambda x: first2names(x.name)).query('name.isin(@u_names)')
+dat_sub = dat_sub.sort_values(['name','time']).reset_index(None, True)
+print(dat_sub.groupby('name').time.max().describe()[['first','last']])
 
 
 
