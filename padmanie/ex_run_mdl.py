@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 """
 EXAMPLE SCRIPT TO SHOW HOW TO LOAD AND RUN A GPYTORCH MODEL
 
