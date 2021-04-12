@@ -54,8 +54,10 @@ print(dat_clin.head())
 
 # Concert to datetime
 dat_clin['arrived'] = pd.to_datetime(dat_clin.arrived.str.strip().str.replace('\\s', '-'),format='%d/%m/%y-%H%M')
-# Drop rows if they are missing data
-dat_clin = dat_clin[dat_clin.arrived.notnull()].reset_index(None,True)
+# Drop rows if they are arrival time data
+dat_clin = dat_clin[dat_clin.arrived.notnull()]
+# Remove any duplicated patient visits
+dat_clin = dat_clin[~dat_clin.CSN.duplicated()].reset_index(None,True)
 
 #######################################
 # --- STEP 2: PROCESS GEOGRAPHIES --- #
@@ -206,10 +208,12 @@ di_arr = {'Ambulatory':'Ambulance', 'Land Ambulance':'Ambulance',
           'Police':'Other', 'Bus':'Car', 'Taxi':'Car', 'Stretcher':'Other'}
 print(np.unique(list(di_arr.values())))
 assert dat_clin.arr_method.isin(list(di_arr)).all()
+dat_clin['arr_method'] = dat_clin.arr_method.map(di_arr)
 
-# Languages
+# Languages (chinsese only)
+dat_clin['language'] = dat_clin.language.str.split('\\s\\-',1,True).iloc[:,0]
 lang_prop = dat_clin.language.value_counts(True)
-lang_keep = list(lang_prop[lang_prop>0.001].index)
+lang_keep = list(lang_prop[lang_prop>0.005].index)
 dat_clin['language'] = np.where(dat_clin.language.isin(lang_keep), dat_clin.language, 'Other')
 
 #############################

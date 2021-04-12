@@ -19,7 +19,7 @@ if hasattr(args, 'groups'):
     groups = args.groups
 
 # # Debugging in PyCharm (78==March 19th)
-# lead, model, dstart, dend, groups, dtrain, dval = 1, 'gpy', 0, 10, ['CTAS'], 3, 7
+# lead, model, dstart, dend, groups, dtrain, dval = 10, 'gpy', 0, 500, ['mds','arr','CTAS'], 3, 7
 
 import os
 import sys
@@ -63,7 +63,7 @@ df_lead_lags = pd.read_csv(os.path.join(dir_flow, 'df_lead_lags.csv'), header=[0
 # Create dates
 dates = df_lead_lags.index.to_frame().astype(str).assign(
     date=lambda x: pd.to_datetime(x.year + '-' + x.month + '-' + x.day + ' ' + x.hour + ':00:00')).date
-# Extract y
+# Extract y (note it's the only column with "lead", the X has "lags")
 yval = df_lead_lags.loc[:, idx[:, 'lead_' + str(lead)]].values.flatten()
 # Remove lags (GP handles them automatically in the kernel)
 Xmat = df_lead_lags.loc[:, idx[:, 'lag_0']].droplevel(1, 1)
@@ -86,12 +86,13 @@ suffix = '_dstart_' + str(dstart) + '_dend_' + str(dend) + '_dtrain_' + str(dtra
 # --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #
 print('# --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #')
 
-# Days of 2020
-d_range = pd.date_range('2020-01-01', '2020-12-31', freq='1d')
+dfmt = '%Y-%m-%d'
+dmax = pd.to_datetime((dates.max()-pd.DateOffset(days=1)).strftime(dfmt))
+print('date max of time series: %s' % dmax.strftime(dfmt))
+# Tests days (Jan 2021 to current)
+d_range = pd.date_range('2020-01-01', dmax.strftime(dfmt), freq='1d')
 d_pred = d_range[dstart:dend]
 # Subset if pred range is outside of date max
-dmax = pd.to_datetime((dates - pd.offsets.Day(1)).max().strftime('%Y-%m-%d'))
-
 if d_pred.min() > dmax:
     sys.exit('Smallest date range is exceeds largest dates in df_lead_lags')
 if d_pred.max() > dmax:
@@ -107,9 +108,9 @@ holder = []
 ii, btime = 0, time()
 for day, s_test in enumerate(d_pred):
     ii += 1
+    break
     # day = 78; s_test = d_pred[day]
-    print('Predicting %i hours ahead for testing day: %s\nIteration %i of %i' %
-          (lead, s_test.strftime('%Y-%m-%d'), day + 1, len(d_pred)))
+    print('Predicting %i hours ahead for testing day: %s\nIteration %i of %i' % (lead, s_test.strftime('%Y-%m-%d'), day + 1, len(d_pred)))
     assert day + 1 <= len(d_pred)
     # Using previous week for validation data
     s_valid = s_test - pd.DateOffset(days=dval)

@@ -103,7 +103,7 @@ dat_clin['md_team'] = mds.copy()
 
 # Merge on demographics
 dat_demo = pd.read_csv(os.path.join(dir_flow, 'demo4flow.csv'))
-dat_clin = dat_clin.merge(dat_demo, 'left', ['CSN', 'MRN'])
+dat_clin = dat_clin.merge(dat_demo, 'inner', ['CSN', 'MRN'])
 dat_clin.drop(columns=['MRN', 'time2pia', 'los'], inplace=True)
 
 ###################################
@@ -124,6 +124,11 @@ dat_labs['order_time'] = pd.to_datetime(dat_labs.date + ' ' + dat_labs.time, for
 dat_labs.drop(columns=['date', 'time'], inplace=True)
 labs = dat_labs.copy()
 pd.DataFrame({'lab': dat_labs.name.unique()}).to_csv(os.path.join(dir_output, 'u_labs.csv'))
+
+# Remove any duplicate rows
+cn_sub = ['MRN', 'order_time', 'name']
+dat_labs = dat_labs[~dat_labs[cn_sub].duplicated()].reset_index(None, True)
+
 # Ensure all days are found
 udt = [first_day] + list((dat_labs.order_time - pd.DateOffset(minutes=1)).dt.strftime(fmt).unique())
 print(dt_range[~dt_range.isin(udt)])
@@ -134,8 +139,7 @@ freq_labs = dat_labs.name.value_counts(True)
 top_labs = list(freq_labs[freq_labs > 0.01].index)
 dat_labs.name = np.where(dat_labs.name.isin(top_labs), dat_labs.name, 'other')
 # Put into wide form
-dat_labs_wide = dat_labs.groupby(['order_time', 'name']).size().reset_index().pivot('order_time', 'name', 0).fillna(
-    0).astype(int).add_prefix('labs_', ).reset_index()
+dat_labs_wide = dat_labs.groupby(['order_time', 'name']).size().reset_index().pivot('order_time', 'name', 0).fillna(0).astype(int).add_prefix('labs_', ).reset_index()
 
 ##################################
 # --- STEP 3: LOAD DI ORDERS --- #
@@ -154,6 +158,8 @@ pd.DataFrame({'lab': dat_DI.name.unique()}).to_csv(os.path.join(dir_output, 'u_D
 del holder, tmp
 dat_DI['order_time'] = pd.to_datetime(dat_DI.date + ' ' + dat_DI.time, format='%d/%m/%Y %I:%M:%S %p')
 dat_DI.drop(columns=['date', 'time'], inplace=True)
+dat_DI = dat_DI[~dat_DI[cn_sub].duplicated()].reset_index(None, True)
+
 DI = dat_DI.copy()
 # Ensure all days are found
 udt = [first_day] + list((dat_DI.order_time - pd.DateOffset(minutes=1)).dt.strftime(fmt).unique())
@@ -207,12 +213,10 @@ print('Clinical features: %s' % ', '.join(cn_clin))
 dt_clin = dat_clin[cn_clin].dtypes
 cn_num = list(dt_clin[dt_clin != 'object'].index)
 cn_fac = list(dt_clin[dt_clin == 'object'].index.drop('md_team'))
-
 cn_idx = ['CSN'] + list(cn_clin)  # All features to index on
 # Long-form
-dat_long = dat_clin.melt(cn_idx, ['arrived', 'discharged'], 'tt', 'date').sort_values('date').reset_index(None,
-                                                                                                          True).assign(
-    ticker=lambda x: np.where(x.tt == 'arrived', +1, -1))
+dat_long = dat_clin.melt(cn_idx, ['arrived', 'discharged'], 'tt', 'date').sort_values('date').reset_index(None,True)
+dat_long = dat_long.assign(ticker=lambda x: np.where(x.tt == 'arrived', +1, -1))
 # Actual patient count
 dat_long.insert(0, 'census', dat_long.ticker.cumsum())
 # Hourly results
@@ -263,17 +267,18 @@ for ii, cn in enumerate(cn_fac):
     tmp = tmp.sort_values([cn] + cn_date + ['tt']).reset_index(None, True)
     # Get share at each hour
     tmp = tmp.pivot_table('value', cn_date + ['tt'], cn)
+    cn_tmp = tmp.columns
     # Factor should exactly equal arrival/discharge
-    qq = tmp.sum(1).reset_index().rename(columns={0: 'n'}).merge(hourly_tt_long, 'right', cn_date + ['tt']).drop(
-        columns=['date'])
+    qq = tmp.sum(1).reset_index().rename(columns={0: 'n'}).merge(hourly_tt_long, 'right', cn_date + ['tt']).drop(columns=['date'])
     assert np.all(qq.n == qq.census)
-    # den = np.atleast_2d(tmp.sum(1).values).T
-    # vals = tmp.values / den
-    # vals[np.where(np.isnan(vals))] = 1 / tmp.columns.shape[0]
-    # tmp = pd.DataFrame(vals, columns=tmp.columns, index=tmp.index)
+    # CALCULATE AS A PERCENTAGE
+    tmp = tmp.merge(hourly_tt_long, 'right', cn_date + ['tt'])
+    tmp_census = tmp.census.copy()
+    tmp = pd.concat([tmp.drop(columns=list(cn_tmp)+['census']),
+                     tmp[cn_tmp].divide(tmp_census.clip(1,tmp_census.max()),axis=0)],1)
     # Re-expand into wide form
     tmp = tmp.reset_index().pivot_table(tmp.columns, cn_date, 'tt')
-    tmp.columns = tmp.columns.to_frame().apply(lambda x: cn + '_' + x[0] + '_' + x[1], 1).to_list()
+    tmp.columns = pd.DataFrame(tmp.columns.to_frame().values).apply(lambda x: cn + '_' + x[0] + '_' + x[1], axis=1).to_list()
     # Merge with existing date
     tmp = hourly_tt[cn_date].merge(tmp.reset_index(), 'left', cn_date)
     tmp = pd.DataFrame(tmp.drop(columns=cn_date).values,
@@ -303,9 +308,7 @@ holder_avg_mds['avg_mds'] = holder_avg_mds.groupby('tt').avg_mds.fillna(method='
 holder_avg_mds = holder_avg_mds.pivot_table('avg_mds', cn_date, 'tt').add_prefix('avgmd_').reset_index()
 
 # Now apply for doctor count
-tmp = dat_clin[['arrived', 'md_team']].assign(year=lambda x: x.arrived.dt.year, month=lambda x: x.arrived.dt.month,
-                                              day=lambda x: x.arrived.dt.day, hour=lambda x: x.arrived.dt.hour).drop(
-    columns=['arrived'])
+tmp = dat_clin[['arrived', 'md_team']].assign(year=lambda x: x.arrived.dt.year, month=lambda x: x.arrived.dt.month, day=lambda x: x.arrived.dt.day, hour=lambda x: x.arrived.dt.hour).drop(columns=['arrived'])
 tmp = hourly_tt[cn_date].merge(tmp[tmp.md_team.notnull()], 'left', cn_date)
 tmp['md_team'] = tmp.md_team.fillna('').str.split(';')
 tmp.index = tmp[cn_date].astype(str).assign(
@@ -317,29 +320,17 @@ for ii in range(nlags, tmp.shape[0]):
         print(ii + 1)
     holder[ii] = len(set(ljoin(tmp.iloc[ii - 10:ii])))
 holder = pd.Series(holder, index=tmp.index).fillna(method='bfill').astype(int)
-holder_u_mds = pd.DataFrame(holder, columns=['u_mds10h']).reset_index().assign(year=lambda x: x.date.dt.year,
-                                                                               month=lambda x: x.date.dt.month,
-                                                                               day=lambda x: x.date.dt.day,
-                                                                               hour=lambda x: x.date.dt.hour).drop(
-    columns=['date'])
+holder_u_mds = pd.DataFrame(holder, columns=['u_mds10h']).reset_index().assign(year=lambda x: x.date.dt.year,month=lambda x: x.date.dt.month, day=lambda x: x.date.dt.day, hour=lambda x: x.date.dt.hour).drop(columns=['date'])
 
 # (v) Merge labs/DI with exiting hour range
-dat_labs_flow = hourly_tt[cn_date].merge(dat_labs_flow, 'left', cn_date).fillna(method='ffill').fillna(
-    method='bfill').astype(int)
-dat_DI_flow = hourly_tt[cn_date].merge(dat_DI_flow, 'left', cn_date).fillna(method='ffill').fillna(
-    method='bfill').astype(int)
+dat_labs_flow = hourly_tt[cn_date].merge(dat_labs_flow, 'left', cn_date).fillna(method='ffill').fillna(method='bfill').astype(int)
+dat_DI_flow = hourly_tt[cn_date].merge(dat_DI_flow, 'left', cn_date).fillna(method='ffill').fillna(method='bfill').astype(int)
 
 # (vi) Full DI/raw labs for Hillary
-q1 = date2ymdh(DI.order_time).assign(name=DI.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,
-                                                                                                                cn_date,
-                                                                                                                'name').fillna(
-    0).astype(int).reset_index()
+q1 = date2ymdh(DI.order_time).assign(name=DI.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
 q1 = hourly_census.drop(columns=['census_var']).merge(q1, 'left', cn_date).fillna(0).astype(int)
 q1.to_csv(os.path.join(dir_flow, 'all_DI.csv'), index=True)
-q2 = date2ymdh(labs.order_time).assign(name=labs.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,
-                                                                                                                    cn_date,
-                                                                                                                    'name').fillna(
-    0).astype(int).reset_index()
+q2 = date2ymdh(labs.order_time).assign(name=labs.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
 q2 = hourly_census.drop(columns=['census_var']).merge(q2, 'left', cn_date).fillna(0).astype(int)
 q2.to_csv(os.path.join(dir_flow, 'all_labs.csv'), index=True)
 
@@ -352,16 +343,17 @@ hourly_X = hourly_X.merge(holder_avg_mds, 'left', cn_date).merge(holder_u_mds, '
 hourly_X = hourly_X.merge(holder_num, 'left', cn_date).merge(hourly_fac, 'left', cn_date)
 hourly_X = hourly_X.merge(dat_labs_flow, 'left', cn_date).merge(dat_DI_flow, 'left', cn_date)
 assert hourly_X.notnull().all().all()
-# Create "lags" for the X features: t+0, t-1, ..., t-2
+# Create "lags" for the X features: t+0, t-1, ..., t-L
 lags = np.arange(nlags + 1)
 cn_X = list(hourly_X.columns.drop(cn_date))
-hourly_X = pd.concat([add_lags(hourly_X[cn_X], ll) for ll in lags], 1).set_index(
-    pd.MultiIndex.from_frame(hourly_X[cn_date])).iloc[nlags:-nlags]
+tmp_idx = pd.MultiIndex.from_frame(hourly_X[cn_date])
+hourly_X = pd.concat([add_lags(hourly_X[cn_X], ll) for ll in lags], 1)
+hourly_X = hourly_X.set_index(tmp_idx).iloc[nlags:-nlags]
 
 # y-labels
 leads = -np.arange(nleads)
-hourly_Y = pd.DataFrame(np.vstack([hourly_census[ylbl].shift(z).values for z in leads]).T).set_index(
-    pd.MultiIndex.from_frame(hourly_census[cn_date]))
+hourly_Y = pd.DataFrame(np.vstack([hourly_census[ylbl].shift(z).values for z in leads]).T)
+hourly_Y = hourly_Y.set_index(pd.MultiIndex.from_frame(hourly_census[cn_date]))
 hourly_Y.columns = pd.MultiIndex.from_product([['y'], ['lead_' + str(z) for z in np.abs(leads)]])
 hourly_Y = hourly_Y.iloc[nlags:-nleads].astype(int)
 

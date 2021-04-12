@@ -36,6 +36,8 @@ lead, mdl_date = args.lead, args.mdl_date
 groups = None
 if hasattr(args, 'groups'):
     groups = args.groups
+# # Assign for debugging
+# lead = 10; mdl_date = "2020-09-07"; groups = ['mds', 'arr', 'CTAS']
 
 import os
 

@@ -1,6 +1,4 @@
-"""
-SCRIPT TO TEST HOW WELL SIMPLE GP DOES WITH HOUR AND TREND ON ONE-DAY-AHEAD FORECASTS
-"""
+# SCRIPT TO TEST HOW WELL SIMPLE GP DOES WITH HOUR AND TREND ON ONE-DAY-AHEAD FORECASTS
 
 import torch
 import gpytorch
@@ -32,9 +30,9 @@ class gp_real(ExactGP):
         self.cidx = cidx
         self.mean = ConstantMean()
         # trend have a linear+cosine, everything else gets RBF
-        self.cn = pd.Series(np.setdiff1d(self.cidx.cn.unique(),['trend']))
-        self.ngroups = len(self.cn)
-        self.pidx_trend = int(self.cidx[self.cidx.cn=='trend'].pidx.values[0])
+        self.tt = pd.Series(np.setdiff1d(self.cidx.tt.unique(),['trend']))
+        self.ngroups = len(self.tt)
+        self.pidx_trend = int(self.cidx[self.cidx.tt=='trend'].pidx.values[0])
         # Number of linear kernels: 2 + ngroups
         # Number of cosine kernels: 2
         # Number of RBF kernels: 2*ngroups
@@ -42,7 +40,7 @@ class gp_real(ExactGP):
         self.kern1_cosine_trend = CosineKernel()
         self.kern2_linear_trend = ScaleKernel(LinearKernel())
         self.kern2_cosine_trend = ScaleKernel(CosineKernel())
-        for col in self.cn:
+        for col in self.tt:
             setattr(self, 'kern1_rbf_' + col, RBFKernel())
             setattr(self, 'kern2_rbf_' + col, ScaleKernel(RBFKernel()))
             setattr(self, 'kern2_linear_' + col, ScaleKernel(LinearKernel()))
@@ -54,8 +52,8 @@ class gp_real(ExactGP):
                    self.kern1_cosine_trend(x[:, self.pidx_trend])
         # Interaction of cyclical/features with trend
         covar_x2 = self.kern2_linear_trend(x[:, self.pidx_trend])*self.kern2_cosine_trend(x[:, self.pidx_trend])
-        for col in self.cn:
-            idx = self.cidx[self.cidx.cn==col].pidx.values
+        for col in self.tt:
+            idx = self.cidx[self.cidx.tt==col].pidx.values
             covar_x1 += getattr(self, 'kern1_rbf_' + col)(x[:, idx])
             covar_x2 += getattr(self, 'kern2_rbf_' + col)(x[:, idx]) * getattr(self, 'kern2_linear_' + col)(x[:, self.pidx_trend])
         # Sum of independent, time-dependent, and interaction
@@ -64,7 +62,7 @@ class gp_real(ExactGP):
         return out
 
 
-# self = mdl(model=model, lead=lead, cn=cn, device=device, groups = ['CTAS'])
+# self = mdl(model=model, lead=lead, cn=cn, device=device, groups = groups)
 # self.fit(X=Xmat_tval, y=y_tval, ntrain=ntrain, nval=nval)
 # self.tune(max_iter=250, lr=0.01)
 # print(pd.Series([name for name, val in self.gp.named_parameters()]))
@@ -103,11 +101,11 @@ class mdl():
         # Subset to valid groups
         self.di_cn = {z: k for z,k in self.di_cn.items() if z in self.groups}
         self.cidx = np.concatenate(list(self.di_cn.values()))
-        self.cidx = pd.concat([pd.DataFrame({'cn':k,'idx':v}) for k,v in self.di_cn.items()])
-        self.cidx.reset_index(None,True).rename_axis('pidx').reset_index()
+        self.cidx = pd.concat([pd.DataFrame({'tt':k,'cn':self.cn[v],'idx':v}) for k,v in self.di_cn.items()])
         self.cidx = self.cidx.reset_index(None,True).rename_axis('pidx').reset_index()
 
-    # ntrain, nval, X, y, max_iter = 1080, 168, Xmat_tval.copy(), y_tval.copy(), 1000
+    # ntrain, nval = 1080, 168
+    # X, y, max_iter = Xmat_tval.copy(), y_tval.copy(), 1000
     def fit(self, X, y, ntrain=1080, nval=168):
         self.ntrain, self.nval = ntrain, nval
         ntot = ntrain + nval

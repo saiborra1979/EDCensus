@@ -33,9 +33,11 @@ python run_exploratory.py
 
 echo "(1) Get the demographic data"
 python process_demographics.py
+# output: demo4flow.csv
 
 echo "(2) Generate the Xy matrix"
 python process_flow.py --bfreq "1 hour" --ylbl "census_max" --nlags 10
+# output: all_DI.csv, all_labs.csv, df_lead_lags.csv
 
 echo "(3) Get descriptive statistics"
 #python explore_AR.py
