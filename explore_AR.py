@@ -8,6 +8,7 @@ import os
 import numpy as np
 import pandas as pd
 from time import time
+from funs_support import gg_save, find_dir_olu
 
 import matplotlib
 import plotnine
@@ -46,14 +47,17 @@ def weighted_quantile(x, weights, quantile=0.5):
             w_q = s_data[idx+1]
     return w_q
 
+
 dir_base = os.getcwd()
-dir_figures = os.path.join(dir_base, '..', 'figures')
-dir_output = os.path.join(dir_base, '..', 'output')
+dir_olu = find_dir_olu()
+dir_figures = os.path.join(dir_olu, 'figures', 'mlmd')
+dir_output = os.path.join(dir_olu, 'output')
+dir_flow = os.path.join(dir_output, 'flow')
 lst_dir = [dir_figures, dir_output]
 assert all([os.path.exists(z) for z in lst_dir])
 
 # --- LOAD DATA --- #
-df_lead_lags = pd.read_csv(os.path.join(dir_output, 'df_lead_lags.csv'), header=[0,1], index_col=[0,1,2,3])
+df_lead_lags = pd.read_csv(os.path.join(dir_flow, 'df_lead_lags.csv'), header=[0,1], index_col=[0,1,2,3])
 # Get datetime from index
 dates = pd.to_datetime(df_lead_lags.index.to_frame().astype(str).apply(lambda x: x.year+'-'+x.month+'-'+x.day+' '+x.hour+':00:00',1))
 df_lead_lags.index = pd.MultiIndex.from_frame(pd.concat([df_lead_lags.index.to_frame(),
@@ -237,20 +241,6 @@ print(check)
 
 ###########################
 # --- STEP 7: FIGURES --- #
-
-# --- (i) Time series of max patients --- #
-tmp = df_lead_lags.loc[:,idx['y',['lag_0']]].droplevel(1,axis=1).reset_index()
-tmp = tmp.assign(date = lambda x: pd.to_datetime(x[cn_date].astype(str).apply(lambda x: '-'.join(x[0:3]),1)),
-                 smooth= lambda x: x.y.rolling(24).mean())
-
-gg_census = (ggplot(tmp, aes(x='date',y='y')) +
-             geom_point(size=0.1) + geom_line(size=0.1) +
-             labs(y='Max patients') + theme_bw() +
-             geom_line(aes(x='date',y='smooth'),data=tmp,color='blue') +
-             ggtitle('Number of maximum patients in ED by hour') +
-             theme(axis_text_x=element_text(angle=90), axis_title_x=element_blank()) +
-             scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y'))
-gg_census.save(os.path.join(dir_figures,'gg_census.png'),width=8,height=5)
 
 # --- (ii) R2 and Coef by Lag --- #
 crit = norm.ppf(1-0.05/2)

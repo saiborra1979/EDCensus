@@ -8,20 +8,21 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--bfreq', type=str, default='1 hour', help='Time binning frequency')
 parser.add_argument('--ylbl', type=str, default='census_max', help='Target label')
-parser.add_argument('--nlags', type=int, default=10, help='Max number of lags')
+parser.add_argument('--nlags', type=int, default=0, help='Max number of lags')
 parser.add_argument('--nleads', type=int, default=25, help='Max number of leads')
 args = parser.parse_args()
 print(args)
 bfreq, ylbl, nlags, nleads = args.bfreq, args.ylbl, args.nlags, args.nleads
 
 # # Debugging in PyCharm
-# bfreq = '1 hour'; ylbl = 'census_max'; nlags = 10; nleads=25
+# bfreq = '1 hour'; ylbl = 'census_max'; nlags = 0; nleads=25
 
 # Load in the required modules
 import os
 import numpy as np
 import pandas as pd
 from funs_support import add_lags, ljoin, date2ymdh, find_dir_olu
+from Mappings import DI_tags
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -68,6 +69,7 @@ cn_nodrop = ['arrived', 'los_min', 'los_clock']
 idx_drop = ~dat_clin[cn_nodrop].isnull().any(axis=1)
 print('A total of %i rows had to be dropped (no arrived or LOS field)' % sum(~idx_drop))
 dat_clin = dat_clin[idx_drop].reset_index(None, True)
+assert ~dat_clin.CSN.duplicated().any()
 
 # Ensure all days are found (note we substract 1 minute off incase someone comes in at midnight)
 fmt = '%Y-%m-%d'
@@ -122,12 +124,12 @@ dat_labs = pd.concat(holder).reset_index(None, True)
 del holder, tmp
 dat_labs['order_time'] = pd.to_datetime(dat_labs.date + ' ' + dat_labs.time, format='%d/%m/%Y %I:%M:%S %p')
 dat_labs.drop(columns=['date', 'time'], inplace=True)
-labs = dat_labs.copy()
-pd.DataFrame({'lab': dat_labs.name.unique()}).to_csv(os.path.join(dir_output, 'u_labs.csv'))
-
+u_labs = pd.DataFrame({'lab': dat_labs.name.unique()})
+u_labs.to_csv(os.path.join(dir_flow, 'u_labs.csv'))
 # Remove any duplicate rows
 cn_sub = ['MRN', 'order_time', 'name']
 dat_labs = dat_labs[~dat_labs[cn_sub].duplicated()].reset_index(None, True)
+# old_labs = dat_labs.copy() # Can be used later for Hillary's analysis
 
 # Ensure all days are found
 udt = [first_day] + list((dat_labs.order_time - pd.DateOffset(minutes=1)).dt.strftime(fmt).unique())
@@ -154,37 +156,34 @@ for fn in fn_DI:
         columns=cn_DI)
     holder.append(tmp)
 dat_DI = pd.concat(holder).reset_index(None, True)
-pd.DataFrame({'lab': dat_DI.name.unique()}).to_csv(os.path.join(dir_output, 'u_DI.csv'))
 del holder, tmp
 dat_DI['order_time'] = pd.to_datetime(dat_DI.date + ' ' + dat_DI.time, format='%d/%m/%Y %I:%M:%S %p')
 dat_DI.drop(columns=['date', 'time'], inplace=True)
 dat_DI = dat_DI[~dat_DI[cn_sub].duplicated()].reset_index(None, True)
+# old_DI = dat_DI.copy()
 
-DI = dat_DI.copy()
 # Ensure all days are found
 udt = [first_day] + list((dat_DI.order_time - pd.DateOffset(minutes=1)).dt.strftime(fmt).unique())
 print(dt_range[~dt_range.isin(udt)])
 assert dt_range.isin(udt).all()
 # Fast parse
-u_DI = pd.Series(dat_DI.name.unique())
-u_DI = pd.DataFrame(u_DI.str.split('\\s', 2, True).iloc[:, 0:2]).rename(columns={0: 'device', 1: 'organ'}).assign(
-    term=u_DI)
-u_DI['device'] = u_DI.device.str.lower().str.replace('\\-|\\/', '')
-u_DI.device[u_DI.device.str.contains('[^a-z]')] = 'other'
-u_DI.organ = u_DI.organ.fillna('other')
-u_DI.organ[u_DI.organ.str.contains('[0-9]')] = 'other'
-u_DI.organ[u_DI.organ.str.len() == 2] = 'Other'
-di_device = dict(zip(u_DI.term, u_DI.device))
-di_organ = dict(zip(u_DI.term, u_DI.organ))
-dat_DI = dat_DI.assign(device=lambda x: x.name.map(di_device), organ=lambda x: x.name.map(di_organ))
+u_DI = pd.DataFrame({'DI': dat_DI.name.unique()})
+u_DI.to_csv(os.path.join(dir_flow, 'u_DI.csv'))
+tmp1 = u_DI.rename_axis('idx').reset_index()
+tmp2 = u_DI.DI.map(DI_tags).explode().rename_axis('idx').reset_index().fillna('Missing')
+u_DI = tmp1.merge(tmp2.rename(columns={'DI':'term'}),'left','idx').drop(columns='idx')
+u_DI['idx'] = u_DI.groupby('DI').cumcount()
+u_DI = u_DI.pivot('DI','idx','term').reset_index().fillna('Missing')
+u_DI.rename(columns={'DI':'name',0:'DI',1:'organ'},inplace=True)
+# Merge with existing data
+dat_DI = dat_DI.merge(u_DI,'left','name')
 dat_DI = dat_DI.drop(columns=['MRN', 'order_id', 'name']).sort_values('order_time').reset_index(None, True)
 # Put into wide form
-dat_DI_wide = dat_DI.groupby(['order_time', 'device']).size().reset_index().pivot('order_time', 'device', 0).fillna(
-    0).astype(int).add_prefix('DI_', ).reset_index()
+dat_DI_wide = dat_DI.groupby(['order_time', 'DI']).size().reset_index().pivot('order_time', 'DI', 0).fillna(0).astype(int).add_prefix('DI_', ).reset_index()
 # Aggregate if too lother
 di_tot = dat_DI_wide.sum(0)
 di_low = list(di_tot[di_tot < 100].index)
-dat_DI_wide.DI_other += dat_DI_wide[di_low].sum(1)
+dat_DI_wide['DI_other'] = dat_DI_wide[di_low].sum(1)
 dat_DI_wide.drop(columns=di_low, inplace=True)
 
 # dat_DI_wide = dat_DI_wide.pivot_table(0,['order_time'],['device','organ']).fillna(0).astype(int)
@@ -323,16 +322,16 @@ holder = pd.Series(holder, index=tmp.index).fillna(method='bfill').astype(int)
 holder_u_mds = pd.DataFrame(holder, columns=['u_mds10h']).reset_index().assign(year=lambda x: x.date.dt.year,month=lambda x: x.date.dt.month, day=lambda x: x.date.dt.day, hour=lambda x: x.date.dt.hour).drop(columns=['date'])
 
 # (v) Merge labs/DI with exiting hour range
-dat_labs_flow = hourly_tt[cn_date].merge(dat_labs_flow, 'left', cn_date).fillna(method='ffill').fillna(method='bfill').astype(int)
-dat_DI_flow = hourly_tt[cn_date].merge(dat_DI_flow, 'left', cn_date).fillna(method='ffill').fillna(method='bfill').astype(int)
+dat_labs_flow = hourly_tt[cn_date].merge(dat_labs_flow, 'left', cn_date).fillna(0).astype(int)
+dat_DI_flow = hourly_tt[cn_date].merge(dat_DI_flow, 'left', cn_date).fillna(0).astype(int)
 
-# (vi) Full DI/raw labs for Hillary
-q1 = date2ymdh(DI.order_time).assign(name=DI.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
-q1 = hourly_census.drop(columns=['census_var']).merge(q1, 'left', cn_date).fillna(0).astype(int)
-q1.to_csv(os.path.join(dir_flow, 'all_DI.csv'), index=True)
-q2 = date2ymdh(labs.order_time).assign(name=labs.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
-q2 = hourly_census.drop(columns=['census_var']).merge(q2, 'left', cn_date).fillna(0).astype(int)
-q2.to_csv(os.path.join(dir_flow, 'all_labs.csv'), index=True)
+# # (vi) Full DI/raw labs for Hillary
+# q1 = date2ymdh(DI.order_time).assign(name=DI.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
+# q1 = hourly_census.drop(columns=['census_var']).merge(q1, 'left', cn_date).fillna(0).astype(int)
+# q1.to_csv(os.path.join(dir_flow, 'all_DI.csv'), index=True)
+# q2 = date2ymdh(labs.order_time).assign(name=labs.name).groupby(cn_date + ['name']).size().reset_index().pivot_table(0,cn_date,'name').fillna(0).astype(int).reset_index()
+# q2 = hourly_census.drop(columns=['census_var']).merge(q2, 'left', cn_date).fillna(0).astype(int)
+# q2.to_csv(os.path.join(dir_flow, 'all_labs.csv'), index=True)
 
 ########################################
 # --- STEP 7: MERGE ALL DATA TYPES --- #
@@ -348,7 +347,9 @@ lags = np.arange(nlags + 1)
 cn_X = list(hourly_X.columns.drop(cn_date))
 tmp_idx = pd.MultiIndex.from_frame(hourly_X[cn_date])
 hourly_X = pd.concat([add_lags(hourly_X[cn_X], ll) for ll in lags], 1)
-hourly_X = hourly_X.set_index(tmp_idx).iloc[nlags:-nlags]
+hourly_X = hourly_X.set_index(tmp_idx)
+if nlags > 0:
+    hourly_X = hourly_X.set_index(tmp_idx).iloc[nlags:-nlags]
 
 # y-labels
 leads = -np.arange(nleads)
@@ -360,3 +361,4 @@ hourly_Y = hourly_Y.iloc[nlags:-nleads].astype(int)
 # Merge data and save for later
 df_lead_lags = hourly_Y.join(hourly_X)
 df_lead_lags.to_csv(os.path.join(dir_flow, 'df_lead_lags.csv'), index=True)
+print('End of process_flow.py script')

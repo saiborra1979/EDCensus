@@ -154,28 +154,6 @@ best_ypred = best_mdl.merge(res_gp)
 best_ylbl.to_csv(os.path.join(dir_output, 'best_ylbl.csv'),index=False)
 best_ypred.to_csv(os.path.join(dir_output, 'best_ypred.csv'),index=False)
 
-# Why the hours of the day are so powerful...
-tmp = act_y.query('date >= "2020-03-01"').drop(columns='year').sort_values(['month','hour','day'])
-tmp = tmp.assign(hour=lambda x: pd.Categorical(x.hour, list(range(24))))
-gg_hour = (ggplot(tmp, aes(x='hour',y='y')) +
-           theme_bw() + facet_wrap('~month',labeller=label_both) +
-           geom_jitter(random_state=1,size=0.5,alpha=0.5,height=0,width=0.1) +
-           geom_boxplot() + labs(x='Hour of day') +
-           ggtitle('Hour of day explains a lot of the variation (>Mar 2020)'))
-gg_hour.save(os.path.join(dir_figures, 'gg_hour.png'), height=8, width=16)
-# Compare today's hour to previous hour
-y_mar2020 = act_y.query('date >= "2020-03-01"').drop(columns='year').assign(doy=lambda x: x.date.dt.dayofyear).drop(columns='date')
-y_mar2020 = y_mar2020.sort_values(['hour','doy']).reset_index(None,True)
-y_mar2020 = y_mar2020.assign(y1=y_mar2020.groupby('hour').y.shift(1,fill_value=-1)).query('y1>0')
-print(y_mar2020.groupby('hour').apply(lambda x: np.corrcoef(x.y, x.y1)[0,1]))
-# Scatter
-gg_hour2 = (ggplot(y_mar2020, aes(x='y1',y='y',color='month')) +
-           theme_bw() + facet_wrap('~hour',labeller=label_both,scales='free') +
-           geom_point() + labs(x="Previous day's hour", y="Current day's hour") +
-           ggtitle('Hour of day explains a lot of the variation (>Mar 2020)') +
-           theme(subplots_adjust={'hspace': 0.20, 'wspace':0.15}) +
-            geom_abline(intercept=0,slope=1))
-gg_hour2.save(os.path.join(dir_figures, 'gg_hour2.png'), height=16, width=16)
 
 # #################################
 # # --- STEP X: GP STATISTICS --- #

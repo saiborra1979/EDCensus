@@ -18,6 +18,12 @@ from itertools import repeat
 
 from scipy.stats import norm
 
+def gg_save(fn,fold,gg,width,height):
+    path = os.path.join(fold, fn)
+    if os.path.exists(path):
+        os.remove(path)
+    gg.save(path, width=width, height=height)
+
 def find_dir_olu():
     dir_base = os.getcwd()
     cpu = socket.gethostname()
@@ -139,12 +145,6 @@ def gg_color_hue(n):
     for h in hues:
         hcl.append(HCL(H=h, L=65, C=100).colors()[0])
     return hcl
-
-def add_CI(df, method='beta', alpha=0.05):
-    assert df.columns.isin(['n','value']).sum() == 2
-    holder = pd.concat(propCI(count=(df.n * df.value).astype(int), nobs=df.n, alpha=alpha, method=method), 1)
-    holder = pd.concat([df, holder.rename(columns={0: 'lb', 1: 'ub'})],1)
-    return holder
 
 # df=tmp.copy(); gg = ['lead']
 # del cn_y, df, df_prec, df_sens, df_both
