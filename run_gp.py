@@ -108,7 +108,6 @@ holder = []
 ii, btime = 0, time()
 for day, s_test in enumerate(d_pred):
     ii += 1
-    break
     # day = 78; s_test = d_pred[day]
     print('Predicting %i hours ahead for testing day: %s\nIteration %i of %i' % (lead, s_test.strftime('%Y-%m-%d'), day + 1, len(d_pred)))
     assert day + 1 <= len(d_pred)

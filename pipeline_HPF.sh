@@ -34,9 +34,9 @@ echo "Lead: "$lead", model: "$model
 
 if [ "$groups" == "None" ]; then
 	echo "Not running a group"
-	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 365
+	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 453
 else
-	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 365 --groups $groups
+	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 453 --groups $groups
 fi
 
 echo "##### end of script ######"
