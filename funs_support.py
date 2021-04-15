@@ -18,6 +18,11 @@ from itertools import repeat
 
 from scipy.stats import norm
 
+def stopifnot(stmt,msg):
+    if not stmt:
+        print(msg)
+    assert stmt
+
 def gg_save(fn,fold,gg,width,height):
     path = os.path.join(fold, fn)
     if os.path.exists(path):
@@ -108,34 +113,6 @@ def find_prec(df, target, gg, tol=0.005, max_iter=50):
     level_star = di_level[tt]
     return level_star
 
-# df=res_train.copy(); level=0.5
-def ordinal_lbls(df, level=0.5):
-    """
-    Function to get ordinal labels for different lower-bounds of the CI
-    """
-    # Columns that df must mave
-    cn_res = ['y_pred', 'hat_pred', 'se', 'y_rt', 'date_rt', 'date_pred']
-    assert len(np.setdiff1d(cn_res, df.columns)) == 0
-    # Apply lower-bound of the level
-    assert (level > 0) & (level < 1)
-    crit = norm.ppf(level)
-    df['hat_pred'] = df.hat_pred - crit*df.se
-    # Make the cuts
-    cn_pred = ['y_rt', 'y_pred', 'hat_pred']
-    ymx = max(df[cn_pred].max().max() + 1, 49)
-    ymi = min(df[cn_pred].min().min() - 1, -1)
-    esc_bins = [ymi, 31, 38, 48, ymx]
-    esc_lbls = ['≤30', '31-37', '38-47', '≥48']
-    df[cn_pred] = df[cn_pred].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
-    # Drop se columns and get remaining groupings
-    df.drop(columns=['se'],inplace=True)
-    cn_gg = list(np.setdiff1d(df.columns, cn_pred+['date_rt','date_pred']))
-    assert len(cn_gg) >= 1
-    df = df.melt(cn_gg + ['date_rt', 'y_rt'], ['y_pred', 'hat_pred'], 'tt', 'value')
-    df['delta'] = df.value - df.y_rt
-    df = df.pivot_table('delta', cn_gg + ['date_rt', 'y_rt'], 'tt').reset_index()
-    df.rename(columns={'hat_pred': 'pred', 'y_pred': 'y'}, inplace=True)
-    return df
 
 
 def gg_color_hue(n):
@@ -145,31 +122,6 @@ def gg_color_hue(n):
     for h in hues:
         hcl.append(HCL(H=h, L=65, C=100).colors()[0])
     return hcl
-
-# df=tmp.copy(); gg = ['lead']
-# del cn_y, df, df_prec, df_sens, df_both
-def sens_spec_df(df, gg):
-    """
-    FUNCTION TO CALCULATE SENSITIVITY/SPECIFCITY FOR A DATAFRAME THAT HAS A
-    "pred" AND "y" and "y_rt" COLUMN WITH LABELS
-    """
-    cn_y = ['y_rt', 'pred', 'y']
-    assert df.columns.isin(cn_y).sum() == len(cn_y)
-    df = df[cn_y + gg].rename_axis('idx').reset_index(None)
-    df = df.pivot_table('idx', gg + ['pred'], 'y', 'count').fillna(0).astype(int)
-    df = df.reset_index().melt(gg + ['pred'], None, None, 'n')
-    df = df.assign(tp=lambda x: np.where(x.pred == x.y, 'tp', 'fp'))
-    # Calculate the precision
-    df_prec = df.groupby(gg + ['pred', 'tp']).n.sum().reset_index()
-    df_prec = df_prec.pivot_table('n', gg + ['pred'], 'tp', 'sum').fillna(0).astype(int).reset_index()
-    df_prec = df_prec.assign(value=lambda x: x.tp / (x.tp + x.fp),
-                             den=lambda x: x.tp + x.fp, metric='prec').drop(columns=['tp', 'fp'])
-    # Calculate sensitivity
-    df_sens = df.query('tp=="tp"').merge(df.groupby(gg + ['y']).n.sum().reset_index().rename(columns={'n': 'den'}))
-    df_sens = df_sens.drop(columns=['y', 'tp']).assign(value=lambda x: x.n / x.den, metric='sens').drop(columns='n')
-    # Stack
-    df_both = pd.concat([df_prec, df_sens]).reset_index(None, True)
-    return df_both
 
 def get_perf(groups):
     cn = groups[0]
