@@ -47,9 +47,10 @@ fn_pt = pd.Series(os.listdir(fold_pt))
 # !!!!! SET DATE AND CN TO PERMUTE !!!!! #
 dt_permute = pd.to_datetime('2020-09-16')
 groups = 'mds-arr-CTAS'  # Separate by hyphen
+sgroups = groups.split('-')
 dval = 7
 dtrain = 3
-
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #
 
 # Find relevant models
 dregex = dt_permute.strftime('%Y%m%d')+'.pth'
@@ -121,8 +122,6 @@ Xmat_tval, y_tval = np.vstack([Xmat_train, Xmat_valid]), np.vstack([y_train, y_v
 #################################
 # --- (2) INITIALIZE MODELS --- #
 
-sgroups = groups.split('-')
-
 di_mdl = {}
 for lead in lead_seq:
     print('Lead: %i' % lead)
@@ -140,10 +139,12 @@ for lead in lead_seq:
 ###################################
 # --- (3) ROLLING PREDICTIONS --- #
 
-cn_permute = 'CTAS_5.0_arrived'
-val_permute = +1
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #
+cn_permute = 'date_hour'
+val_permute = +10
 hour_permute = 3  # 0 is midnight, 23 is 11pm
 assert hour_permute >= 0 & hour_permute <= 23
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #
 
 # Check that column is in
 assert cn_permute in dat_cidx.cn.to_list()
