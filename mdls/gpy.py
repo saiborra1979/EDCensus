@@ -45,6 +45,7 @@ class gp_real(ExactGP):
             setattr(self, 'kern2_rbf_' + col, ScaleKernel(RBFKernel()))
             setattr(self, 'kern2_linear_' + col, ScaleKernel(LinearKernel()))
 
+
     def forward(self, x):
         mean_x = self.mean(x)
         # Independent signals: trend, cyclical, RBF-freatures
@@ -167,6 +168,7 @@ class mdl():
 
 
     # X, y = Xmat_test.copy(), y_test.copy()
+    # self=copy.deepcopy(di_mdl[lead])
     def predict(self, X, y=None):
         assert self.isfit & self.istrained
         Xtil = torch.tensor(self.encX.transform(X[:,self.cidx.idx.values]),dtype=torch.float32).to(self.device)
@@ -180,7 +182,7 @@ class mdl():
         for i in range(ntest):
             xslice = Xtil[[i]]
             with torch.no_grad(), gpytorch.settings.max_cg_iterations(10000):
-                pred = self.gp(xslice)  #self.likelihood()
+                pred = self.gp(xslice)
             res[i] = [pred.mean.item(), pred.stddev.item()]
             # Append on test set
             if y is not None:

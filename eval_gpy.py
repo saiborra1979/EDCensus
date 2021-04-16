@@ -6,7 +6,7 @@ import numpy as np
 from plotnine import *
 from sklearn.metrics import r2_score
 
-from funs_support import ymdh2date, ymd2date, date2ymd, find_dir_olu, sens_spec_df, gg_color_hue, gg_save
+from funs_support import ymdh2date, ymd2date, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
 from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls
 
 from mdls.gpy import gp_real
@@ -16,11 +16,13 @@ import gpytorch
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
 dir_figures = os.path.join(dir_olu, 'figures', 'census')
+dir_kernel = os.path.join(dir_figures, 'kernel')
 dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 lst_dir = [dir_figures, dir_output, dir_flow, dir_test]
 assert all([os.path.exists(z) for z in lst_dir])
+makeifnot(dir_kernel)
 
 cn_ymd = ['year', 'month', 'day']
 cn_ymdh = cn_ymd + ['hour']
@@ -164,6 +166,8 @@ else:
     assert dat_kernel.groupby(['cn','kern','coef','lvl']).size().unique().shape[0] == 1
     print('Saving dat_kernel for later')
     dat_kernel.to_csv(path_kernel,index=False)
+# Ensure its datetime
+dat_kernel.dates = pd.to_datetime(dat_kernel.dates)
 
 #####################################
 # --- (2) R-SQUARED PERFORMANCE --- #
@@ -191,8 +195,45 @@ gg_r2_best = (ggplot(df_r2, aes(x='date', y='trend', color='lead', groups='lead.
               facet_wrap('~leads',labeller=label_both))
 gg_save('gg_r2_best.png',dir_figures,gg_r2_best,13,8)
 
+######################################
+# --- (3) KERNEL HYPERPARAMETERS --- #
+
+n_hour = 24*3
+
+n_kern = dat_kernel.groupby(['cn','kern','coef','lvl']).size().reset_index()
+
+for i, r in n_kern.iterrows():
+    print('row %i of %i' % (i+1,len(n_kern)))
+    cn, kern, coef, lvl = r['cn'], r['kern'], r['coef'], r['lvl']
+    tmp_data = dat_kernel.query('cn==@cn & kern==@kern & coef==@coef & lvl==@lvl')[cn_keep].reset_index(None,True)
+    tmp_data = tmp_data.assign(qlead=lambda x: pd.cut(x.lead,range(0,25,6)))
+    tmp_fn = 'cn-'+cn+'_'+'kern-'+kern+'_'+'coef-'+coef+'_'+'lvl-'+lvl+'.png'
+    gtit = 'cn='+cn+', '+'kern='+kern+', '+'coef='+coef+', '+'lvl='+lvl
+    gg_tmp = (ggplot(tmp_data,aes(x='dates',y='value',color='lead')) + 
+              theme_bw() + geom_line() + ggtitle(gtit) + 
+              scale_color_cmap(name='Lead') + 
+              facet_wrap('~qlead',nrow=2) + 
+              theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+              scale_x_datetime(date_breaks='2 month', date_labels='%b, %Y'))
+    gg_save(tmp_fn,dir_kernel,gg_tmp,10,8)
+
+daily_y = act_y.assign(mu=lambda x: x.y_rt.rolling(n_hour).mean(), se=lambda x: x.y_rt.rolling(n_hour).std(1)).dropna()
+daily_y = daily_y.assign(y=lambda x: (x.y_rt-x.mu)/x.se, dates=lambda x: x.dates.dt.strftime('%Y-%m-%d'))
+daily_y = daily_y.groupby('dates').y.mean().reset_index().assign(dates=lambda x: pd.to_datetime(x.dates))
+
+cn_keep = ['dates','lead','value']
+# (i) Does distribution in means align with actual y data?
+dat_const = dat_kernel.query('cn=="constant"')[cn_keep].merge(daily_y)
+# dat_const = dat_const.melt(['dates','lead'],['value','y'],'tt')
+
+gg_const = (ggplot(dat_const,aes(x='y',y='value')) + 
+    theme_bw() + geom_point(size=0.5,alpha=0.5,color='blue') + 
+    facet_wrap('~lead',labeller=label_both,ncol=6))
+gg_save('gg_const.png',dir_kernel,gg_const,16,10)
+
+
 ################################
-# --- (3) PRECISION/RECALL --- #
+# --- (4) PRECISION/RECALL --- #
 
 ymi, ymx = dat_recent.pred.min()-1, dat_recent.pred.max()+1
 esc_bins = [ymi - 1, 31, 38, 48, ymx + 1]
@@ -324,10 +365,6 @@ gg_save('gg_pr_month.png',dir_figures,gg_pr_month,16,12)
 #     ggtitle('Stability of precision across months'))
 # gg_save('gg_recall_thresh.png',dir_figures,gg_recall_thresh,16,12)
 
-
-
-######################################
-# --- (3) KERNEL HYPERPARAMETERS --- #
 
 
 
