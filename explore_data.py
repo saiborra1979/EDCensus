@@ -114,7 +114,8 @@ alpha = 0.05
 
 # (i) Calculate the R2
 dat_hour = dat_census.drop(columns=['date','smooth']).sort_values(['hour']+cn_ymd).reset_index(None,True)
-dat_hour = dat_hour.assign(ly=lambda x: x.groupby('hour').y.shift(1)).dropna().astype(int)
+dat_hour = dat_hour.assign(ly=lambda x: x.groupby('hour').y.shift(1))
+dat_hour = dat_hour.dropna().assign(ly=lambda x: x.ly.astype(int))
 dat_r2_hour = dat_hour.groupby('hour').apply(lambda x: r2_score(x.y,x.ly)).reset_index().rename(columns={0:'r2'})
 # Get the CI
 dat_bs_hour = dat_hour.drop(columns=cn_ymd).groupby('hour')
@@ -165,8 +166,3 @@ gg_daily_MAPE = (ggplot(dat_rolling_mape, aes(x='date',y='mape')) +
     theme(axis_text_x=element_text(angle=90),axis_title_x=element_blank()) + 
     scale_y_continuous(limits=[0,ymax]))
 gg_daily_MAPE.save(os.path.join(dir_figures, 'gg_daily_MAPE.png'), height=5, width=10)
-
-
-
-
-
