@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from funs_support import vhaversine, pc_extract, find_dir_olu
+from funs_support import vhaversine, pc_extract, find_dir_olu, makeifnot
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -17,9 +17,7 @@ dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 folders = [dir_output, dir_flow]
 for dd in folders:
-    if not os.path.exists(dd):
-        print('making output directory: %s' % dd)
-        os.mkdir(dd)
+    makeifnot(dd)
 
 #############################
 # --- STEP 1: LOAD DATA --- #
@@ -190,6 +188,9 @@ cn_num = ['age','weight','pulse','resp','temp','num_meds','systolic','diastolic'
 for cn in cn_num:
     if dat_clin[cn].isnull().any():
         dat_clin[cn] = dat_clin[cn].fillna(dat_clin[cn].median())
+
+# Replace integers
+dat_clin['CTAS'] = dat_clin.CTAS.astype('str').str.replace('\\.0','')
 
 #################################################
 # --- STEP 4: AGGREGATE CATEGORICAL FACTORS --- #

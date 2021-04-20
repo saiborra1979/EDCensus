@@ -62,13 +62,16 @@ del holder
 # Convert to datetime
 dat_clin['arrived'] = dat_clin.arrived.str.strip().str.replace('\\s', '-')
 dat_clin['arrived'] = pd.to_datetime(dat_clin.arrived, format='%d/%m/%y-%H%M')
-dat_clin = dat_clin.sort_values('arrived').reset_index(None, True)
+dat_clin = dat_clin.sort_values('arrived')
 
 # Remove rows if missing
 cn_nodrop = ['arrived', 'los_min', 'los_clock']
 idx_drop = ~dat_clin[cn_nodrop].isnull().any(axis=1)
 print('A total of %i rows had to be dropped (no arrived or LOS field)' % sum(~idx_drop))
 dat_clin = dat_clin[idx_drop].reset_index(None, True)
+
+# Drop duplicate CSNs
+dat_clin = dat_clin[~dat_clin.CSN.duplicated()].reset_index(None, True)
 assert ~dat_clin.CSN.duplicated().any()
 
 # Ensure all days are found (note we substract 1 minute off incase someone comes in at midnight)
@@ -262,7 +265,8 @@ for ii, cn in enumerate(cn_fac):
     print('column: %s (%i of %i)' % (cn, ii + 1, len(cn_fac)))
     # Get into long-format
     tmp = dat_long.groupby(cn_date + ['tt', cn]).size().reset_index()
-    tmp = tmp.pivot_table(0, cn_date[:-1], ['tt', 'hour', cn]).fillna(0).astype(int).reset_index().melt(cn_date[:-1])
+    tmp = tmp.pivot_table(0, cn_date[:-1], ['tt', 'hour', cn])
+    tmp = tmp.fillna(0).astype(int).reset_index().melt(cn_date[:-1])
     tmp = tmp.sort_values([cn] + cn_date + ['tt']).reset_index(None, True)
     # Get share at each hour
     tmp = tmp.pivot_table('value', cn_date + ['tt'], cn)
@@ -276,7 +280,7 @@ for ii, cn in enumerate(cn_fac):
     tmp = pd.concat([tmp.drop(columns=list(cn_tmp)+['census']),
                      tmp[cn_tmp].divide(tmp_census.clip(1,tmp_census.max()),axis=0)],1)
     # Re-expand into wide form
-    tmp = tmp.reset_index().pivot_table(tmp.columns, cn_date, 'tt')
+    tmp = tmp.reset_index(None,True).pivot_table(tmp.columns, cn_date, 'tt')
     tmp.columns = pd.DataFrame(tmp.columns.to_frame().values).apply(lambda x: cn + '_' + x[0] + '_' + x[1], axis=1).to_list()
     # Merge with existing date
     tmp = hourly_tt[cn_date].merge(tmp.reset_index(), 'left', cn_date)
