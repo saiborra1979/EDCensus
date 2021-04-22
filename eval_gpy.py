@@ -117,7 +117,7 @@ else:
     u_attr = mdl_attr.copy()
     mdl_attr = mdl_attr[mdl_attr != 'mean.constant']  # Only term without a constraint
     tt_attr = mdl_attr.str.split('\\.',1,True).iloc[:,0].str.split('\\_',2,True).iloc[:,2].fillna('noise')
-    tt_attr = np.setdiff1d('noise',tt_attr.unique())
+    tt_attr = np.setdiff1d(tt_attr.unique(),['noise'])
     print('GP uses the following feature types (tt): %s' % (', '.join(tt_attr)))
     # Load in the model
     n_samp = 50
@@ -235,23 +235,29 @@ gg_save('gg_const.png',dir_kernel,gg_const,16,10)
 ################################
 # --- (4) PRECISION/RECALL --- #
 
+posd = position_dodge(0.5)
+
 ymi, ymx = dat_recent.pred.min()-1, dat_recent.pred.max()+1
 esc_bins = [ymi - 1, 31, 38, 48, ymx + 1]
 esc_lbls = ['≤30', '31-37', '38-47', '≥48']
 esc_lvls = [0,1,2,3]
 
 # Calculate the change in escalation levels
-dat_pr = dat_recent.merge(act_y,'left','dates').assign(month=lambda x: x.dates.dt.strftime('%m').astype(int))
+dat_pr = dat_recent.merge(act_y,'left','dates')
+dat_pr['month'] = dat_pr.dates.dt.strftime('%m').astype(int)
+dat_pr['year'] = dat_pr.dates.dt.strftime('%Y').astype(int)
 cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'dates', 'y', 'y_rt', 'pred', 'se'
 dat_ord = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=0.5)
+
 # Escalation changes by sign (-1/0/+1)
+cn_drop = ['year','month']
 tmp = dat_ord.assign(pred=lambda x: np.sign(x.pred),y=lambda x: np.sign(x.y))
-res_sp_agg = prec_recall_lbls(tmp.drop(columns='month'), cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_idx=cn_date)
+res_sp_agg = prec_recall_lbls(tmp.drop(columns=cn_drop), cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_idx=cn_date)
 # Sign by month
 res_sp_month = prec_recall_lbls(tmp, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_idx=cn_date)
 del tmp
 # All escalations
-res_sp_full = prec_recall_lbls(dat_ord.drop(columns='month'), cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_idx=cn_date)
+res_sp_full = prec_recall_lbls(dat_ord.drop(columns=cn_drop), cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_idx=cn_date)
 
 # - (i) Breakdown of TPs/FPs - #
 tmp0 = pd.concat([res_sp_agg.query('pred==1').assign(pred=0), res_sp_full.query('pred>0')])
@@ -273,7 +279,6 @@ gg_tp_full = (ggplot(tmp, aes(x='lead', y='n', color='metric')) +
 gg_save('gg_tp_full.png',dir_figures,gg_tp_full,14,7)
 
 # - (ii) Precision/Recall with CI - #
-posd = position_dodge(0.5)
 cn_n, cn_val = 'den', 'value'
 tmp1 = add_bin_CI(res_sp_agg.query('pred==0'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
 tmp2 = add_bin_CI(res_sp_full.query('pred > 0'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
@@ -304,6 +309,7 @@ gg_sp_agg = (ggplot(tmp1, aes(x='lead', y='value', color='metric')) +
 gg_save('gg_sp_agg.png',dir_figures,gg_sp_agg,9,5)
 
 tmp = add_bin_CI(res_sp_month.query('pred==1'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
+tmp.reset_index(None,True).loc[0]
 height = int(np.ceil(len(tmp.month.unique()) / 2)) * 3
 gg_sp_month = (ggplot(tmp, aes(x='lead', y='value', color='metric')) +
              theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
@@ -311,7 +317,7 @@ gg_sp_month = (ggplot(tmp, aes(x='lead', y='value', color='metric')) +
              scale_x_continuous(breaks=list(range(1,25))) +
              labs(x='Forecasting lead', y='Precision/Recall') +
              geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
-             facet_wrap('~month',ncol=3,labeller=label_both))
+             facet_wrap('~year+month',ncol=3,labeller=label_both))
 gg_save('gg_sp_month.png',dir_figures,gg_sp_month,16,height)
 
 # - (iii) Precision/recall curve - #
@@ -321,17 +327,17 @@ holder = []
 for p in p_seq:
     print('percentile: %0.2f' % p)
     tmp_month = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=p)
-    tmp_agg = ordinal_lbls(dat_pr.drop(columns='month'), cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=p)
-    tmp = pd.concat([tmp_agg.assign(month=0), tmp_month])
+    tmp_agg = ordinal_lbls(dat_pr.drop(columns=cn_drop), cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=p)
+    tmp = pd.concat([tmp_agg.assign(month=0,year=0), tmp_month])
     del tmp_agg, tmp_month
     tmp[cn_sign] = tmp[cn_sign].apply(lambda x: np.sign(x), 0)
     tmp = prec_recall_lbls(tmp, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_idx=cn_date)
     tmp = tmp.query('pred==1').drop(columns='pred').assign(p=p)
     holder.append(tmp)
 # Merge and plot
-df_pr = pd.concat(holder).pivot_table('value',['month','p','lead'],'metric').reset_index()
+df_pr = pd.concat(holder).pivot_table('value',['year','month','p','lead'],'metric').reset_index()
 
-tmp = df_pr.query('month==0')
+tmp = df_pr.query('month==0 & year==0')
 gg_pr_agg = (ggplot(tmp, aes(x='sens',y='prec',color='lead',group='lead')) +
     theme_bw() + geom_line() + 
     labs(x='Recall',y='Precision') +
@@ -344,8 +350,9 @@ gg_pr_agg = (ggplot(tmp, aes(x='sens',y='prec',color='lead',group='lead')) +
             legend_background=element_blank(),legend_key_size=10))
 gg_save('gg_pr_agg.png',dir_figures,gg_pr_agg,5,4)
 
-tmp = df_pr.query('month>0').assign(month=lambda x: x.month.astype(str))
-gg_pr_month = (ggplot(tmp, aes(x='sens',y='prec',color='month',group='month')) +
+tmp = df_pr.query('month>0 & year>0').assign(ymon=lambda x: (x.year+x.month/10).astype(str))
+
+gg_pr_month = (ggplot(tmp, aes(x='sens',y='prec',color='ymon',group='ymon')) +
     theme_bw() + geom_line() + 
     labs(x='Recall',y='Precision') +
     geom_abline(slope=-1,intercept=1,linetype='--') +
@@ -364,15 +371,3 @@ gg_save('gg_pr_month.png',dir_figures,gg_pr_month,16,12)
 #     facet_wrap('~lead',labeller=label_both) + 
 #     ggtitle('Stability of precision across months'))
 # gg_save('gg_recall_thresh.png',dir_figures,gg_recall_thresh,16,12)
-
-
-
-
-
-
-
-
-
-
-
-
