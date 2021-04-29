@@ -28,16 +28,13 @@ dir_base = os.getcwd()
 dir_olu = find_dir_olu()
 dir_data = os.path.join(dir_olu, 'data')
 dir_pulls = os.path.join(dir_olu, 'pulls')
-dir_figures = os.path.join(dir_olu, 'figures')
 dir_clin = os.path.join(dir_pulls, 'triage_clin')
 dir_labs = os.path.join(dir_pulls, 'labs')
 dir_DI = os.path.join(dir_pulls, 'DI')
 dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 
-lst_dir = [dir_data, dir_pulls, dir_figures,
-           dir_clin, dir_labs, dir_DI,
-           dir_output, dir_flow]
+lst_dir = [dir_data, dir_pulls, dir_clin, dir_labs, dir_DI,dir_output, dir_flow]
 assert all([os.path.exists(z) for z in lst_dir])
 
 idx = pd.IndexSlice

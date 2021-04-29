@@ -11,8 +11,7 @@ parser.add_argument('--groups', nargs='+',
 args = parser.parse_args()
 print(args)
 lead, model = args.lead, args.model,
-dtrain, dval = args.dtrain, args.dval
-dstart, dend = args.dstart, args.dend
+dtrain, dval, dstart = args.dtrain, args.dval, args.dstart
 groups = None
 if hasattr(args, 'groups'):
     groups = args.groups

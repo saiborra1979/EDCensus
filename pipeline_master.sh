@@ -26,7 +26,7 @@ else
   return
 fi
 
-#source transfer_csv.sh sep 2020
+return
 
 #############################
 # --- (1) PREPROCESSING --- #
