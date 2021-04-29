@@ -8,15 +8,17 @@ parser.add_argument('--model', type=str, default='gpy', help='Which GP to use?')
 parser.add_argument('--dstart', type=int, default=0, help='Day to start in 2020 (0==Jan 1)')
 parser.add_argument('--groups', nargs='+',
                     help='Which kernel groups to include? (mds, health, demo, language, CTAS, arr, labs, DI)')
+parser.add_argument('--save_pt', help='Should kernels be saved?', action='store_true')
 args = parser.parse_args()
 print(args)
 lead, model = args.lead, args.model,
 dtrain, dval, dstart = args.dtrain, args.dval, args.dstart
+save_pt = args.save_pt
 groups = None
 if hasattr(args, 'groups'):
     groups = args.groups
 
-# lead, model, dstart, groups, dtrain, dval = 10, 'gpy', 60, ['mds','arr','CTAS'], 3, 0
+# lead, model, dstart, groups, dtrain, dval, save_pt = 10, 'gpy', 60, ['mds','arr','CTAS'], 3, 0, False
 
 import os
 import sys
@@ -39,7 +41,8 @@ dir_save = os.path.join(dir_test, datetime.now().strftime('%Y_%m_%d'))
 dir_save_pt = os.path.join(dir_save, 'pt')
 makeifnot(dir_test)
 makeifnot(dir_save)
-makeifnot(dir_save_pt)
+if save_pt:
+    makeifnot(dir_save_pt)
 
 idx = pd.IndexSlice
 use_cuda = torch.cuda.is_available()
@@ -132,7 +135,8 @@ for day, s_test in enumerate(d_pred):
     torch.cuda.empty_cache()
     holder_state = gp.gp.state_dict().copy()
     fn_state = gp.fn.replace('.pkl',suffix+'_day_'+s_test.strftime('%Y%m%d')+'.pth')
-    torch.save(holder_state, os.path.join(dir_save_pt,fn_state))
+    if save_pt:
+        torch.save(holder_state, os.path.join(dir_save_pt,fn_state))
     res = gp.predict(X=Xmat_test, y=y_test)
     res = res.assign(date=s_test).rename_axis('hour').reset_index()
     holder.append(res)
@@ -149,13 +153,4 @@ df_res = pd.concat(holder).reset_index(None, True).rename(columns={'mu': 'pred'}
 df_res = df_res.assign(lead=lead, model=model, groups=sgroups, ntrain=ntrain)
 df_res.to_csv(os.path.join(dir_save, fn_res), index=False)
 
-# # Day forecast
-# tmp = pd.concat([gp.res_train.drop(columns=['se','idx']), res.assign(tt='test').drop(columns=['hour','date'])])
-# tmp = tmp.reset_index(None, True).rename_axis('idx').reset_index()
-# from plotnine import *
-# gg_torch = (ggplot(tmp[tmp.tt!='train'], aes(x='idx', y='mu', color='tt')) + theme_bw() + geom_line() +
-#             geom_vline(xintercept=gp.ntrain) + geom_ribbon(aes(ymin='lb', ymax='ub'), alpha=0.5) +
-#             geom_point(aes(x='idx', y='y'), color='black', size=0.5, alpha=0.5))
-# gg_torch.save(os.path.join(dir_figures, 'test.png'),width=12,height=7)
-
-
+print('End of script')
