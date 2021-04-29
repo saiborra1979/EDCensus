@@ -105,12 +105,11 @@ class mdl():
         self.cidx = pd.concat([pd.DataFrame({'tt':k,'cn':self.cn[v],'idx':v}) for k,v in self.di_cn.items()])
         self.cidx = self.cidx.reset_index(None,True).rename_axis('pidx').reset_index()
 
-    # ntrain, nval = 1080, 168
-    # X, y, max_iter = Xmat_tval.copy(), y_tval.copy(), 1000
-    def fit(self, X, y, ntrain=1080, nval=168):
-        self.ntrain, self.nval = ntrain, nval
-        ntot = ntrain + nval
-        Xtil, ytil = X[-ntot:,self.cidx.idx], y[-ntot:]
+    # X, y = Xmat_tval.copy(), y_tval.copy()
+    def fit(self, X, y):
+        ntot = len(X)
+        assert ntot == len(y)
+        Xtil, ytil = X[:,self.cidx.idx].copy(), y.copy()
         self.encX.fit(Xtil)
         self.encY.fit(ytil)  # Learn scaling
         Xtil = torch.tensor(self.encX.transform(Xtil)).to(self.device)
@@ -168,7 +167,6 @@ class mdl():
 
 
     # X, y = Xmat_test.copy(), y_test.copy()
-    # self=copy.deepcopy(di_mdl[lead])
     def predict(self, X, y=None):
         assert self.isfit & self.istrained
         Xtil = torch.tensor(self.encX.transform(X[:,self.cidx.idx.values]),dtype=torch.float32).to(self.device)

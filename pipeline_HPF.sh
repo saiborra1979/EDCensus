@@ -32,11 +32,12 @@ lead=$(($PBS_ARRAYID))
 model="gpy"  # should line up with mdls/{}.py
 echo "Lead: "$lead", model: "$model
 
+# dstart=60 Corresponds to March 1st, 2020
 if [ "$groups" == "None" ]; then
 	echo "Not running a group"
-	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 453
+	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 0 --dstart 60
 else
-	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 7 --dstart 60 --dend 453 --groups $groups
+	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 0 --dstart 60 --groups $groups
 fi
 
 echo "##### end of script ######"

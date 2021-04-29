@@ -6,7 +6,6 @@ parser.add_argument('--dtrain', type=int, default=125, help='How many training d
 parser.add_argument('--dval', type=int, default=7, help='How many validation days to use?')
 parser.add_argument('--model', type=str, default='gpy', help='Which GP to use?')
 parser.add_argument('--dstart', type=int, default=0, help='Day to start in 2020 (0==Jan 1)')
-parser.add_argument('--dend', type=int, default=366, help='Day to end in 2020 (366==Dec 31)')
 parser.add_argument('--groups', nargs='+',
                     help='Which kernel groups to include? (mds, health, demo, language, CTAS, arr, labs, DI)')
 args = parser.parse_args()
@@ -18,8 +17,7 @@ groups = None
 if hasattr(args, 'groups'):
     groups = args.groups
 
-# # Debugging in PyCharm (78==March 19th)
-# lead, model, dstart, dend, groups, dtrain, dval = 10, 'gpy', 0, 500, ['mds','arr','CTAS'], 3, 7
+# lead, model, dstart, groups, dtrain, dval = 10, 'gpy', 60, ['mds','arr','CTAS'], 3, 0
 
 import os
 import sys
@@ -31,8 +29,6 @@ import torch
 from datetime import datetime
 from funs_support import makeifnot, find_dir_olu
 import gpytorch
-
-# from sklearn.metrics import r2_score
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -80,7 +76,8 @@ if groups is None:
 else:
     sgroups = '-'.join(groups)
 # For saving: day start/end/# training days/groups
-suffix = '_dstart_' + str(dstart) + '_dend_' + str(dend) + '_dtrain_' + str(dtrain)  + '_groups_' + sgroups
+dat_suffix = pd.DataFrame({'term':['dstart','dtrain','dval','groups'],'val':[dstart,dtrain,dval,sgroups]})
+suffix = dat_suffix.assign(lbl=lambda x: '_'+x.term+'_'+x.val.astype(str)).lbl.str.cat(sep='')
 
 ################################################
 # --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #
@@ -89,9 +86,9 @@ print('# --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #')
 dfmt = '%Y-%m-%d'
 dmax = pd.to_datetime((dates.max()-pd.DateOffset(days=1)).strftime(dfmt))
 print('date max of time series: %s' % dmax.strftime(dfmt))
-# Tests days (Jan 2021 to current)
+# dstart==0 implies Jan 1, 2020
 d_range = pd.date_range('2020-01-01', dmax.strftime(dfmt), freq='1d')
-d_pred = d_range[dstart:dend]
+d_pred = d_range[dstart:]
 # Subset if pred range is outside of date max
 if d_pred.min() > dmax:
     sys.exit('Smallest date range is exceeds largest dates in df_lead_lags')
@@ -99,7 +96,6 @@ if d_pred.max() > dmax:
     print('d_pred has dates greater than dmax, subsetting')
     d_pred = d_pred[d_pred <= dmax]
 
-print('Test days to be predicted:\n%s\n' % ', '.join(d_pred.astype(str)))
 
 # Initialize model. Valid groups: mds, health, demo, language, CTAS, arr, labs, DI
 gp = mdl(model=model, lead=lead, cn=cn, device=device, groups=groups)
@@ -108,7 +104,6 @@ holder = []
 ii, btime = 0, time()
 for day, s_test in enumerate(d_pred):
     ii += 1
-    # day = 78; s_test = d_pred[day]
     print('Predicting %i hours ahead for testing day: %s\nIteration %i of %i' % (lead, s_test.strftime('%Y-%m-%d'), day + 1, len(d_pred)))
     assert day + 1 <= len(d_pred)
     # Using previous week for validation data
@@ -126,9 +121,9 @@ for day, s_test in enumerate(d_pred):
     Xmat_test, y_test = Xmat[idx_test], yval[idx_test]
     ntrain, nval, ntest = Xmat_train.shape[0], Xmat_valid.shape[0], Xmat_test.shape[0]
     print('Training size: %i, validation size: %i, test size: %i' % (ntrain, nval, ntest))
-    # Combine train/validation
+    # Combine train/validation for GP
     Xmat_tval, y_tval = np.vstack([Xmat_train, Xmat_valid]), np.append(y_train, y_valid)
-    gp.fit(X=Xmat_tval, y=y_tval, ntrain=ntrain, nval=nval)
+    gp.fit(X=Xmat_tval, y=y_tval)
     if ii > 1:
         gp.gp.load_state_dict(holder_state)  # Load state dict from previous iteration
     if ii == 2:
