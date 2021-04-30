@@ -12,32 +12,34 @@
 #custom: PBS -t 5-6
 
 # EXAMPLE OF HOW TO RUN: qsub -N gpy_run -t 1-6 pipeline_HPF.sh
-echo "Groups: "$groups
-ndays=$(($ndays))
-echo "Number of days: "$ndays
-
 cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow || return
 pwd
 which python
 module load python/3.8.1
 fold_env="/hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate"
 . $fold_env
-which python
 python -u check_cuda.py
 
 echo "JOBID = "$PBS_JOBID
 
-# Assign the lead
-lead=$(($PBS_ARRAYID))
-model="gpy"  # should line up with mdls/{}.py
-echo "Lead: "$lead", model: "$model
+# MULTITASK GP
+ndays=$(($PBS_ARRAYID))
+echo "Number of days: "$ndays
+echo "Groups: "$groups
+#python -u run_mgp.py --model mgpy --dtrain $ndays --dval 0 --dstart 60 --groups $groups
 
-# dstart=60 Corresponds to March 1st, 2020
-if [ "$groups" == "None" ]; then
-	echo "Not running a group"
-	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 0 --dstart 60
-else
-	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 0 --dstart 60 --groups $groups
-fi
+
+# VANILLA GP
+# lead=$(($PBS_ARRAYID))
+# model="gpy"  # should line up with mdls/{}.py
+# echo "Lead: "$lead", model: "$model
+
+# # dstart=60 Corresponds to March 1st, 2020
+# if [ "$groups" == "None" ]; then
+# 	echo "Not running a group"
+# 	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 0 --dstart 60
+# else
+# 	python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 0 --dstart 60 --groups $groups
+# fi
 
 echo "##### end of script ######"
