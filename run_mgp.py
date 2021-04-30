@@ -10,7 +10,7 @@ parser.add_argument('--groups', nargs='+',
 parser.add_argument('--save_pt', help='Should kernels be saved?', action='store_true')
 args = parser.parse_args()
 print(args)
-model, save_pt = args.lead, args.save_pt
+model, save_pt = args.model, args.save_pt
 dtrain, dval, dstart = args.dtrain, args.dval, args.dstart
 groups = None
 if hasattr(args, 'groups'):
@@ -131,7 +131,7 @@ for day, s_test in enumerate(d_pred):
     if ii == 2:
         btime = time()
     stime = time()
-    mgp.tune(max_iter=1000, lr=0.01, get_train=True)
+    mgp.tune(max_iter=1000, lr=0.01, get_train=False)
     torch.cuda.empty_cache()
     holder_state = mgp.gp.state_dict().copy()
     fn_state = mgp.fn.replace('.pkl',suffix+'_day_'+s_test.strftime('%Y%m%d')+'.pth')

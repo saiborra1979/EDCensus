@@ -22,16 +22,19 @@ python -u check_cuda.py
 
 echo "JOBID = "$PBS_JOBID
 
-# MULTITASK GP
-ndays=$(($PBS_ARRAYID))
-echo "Number of days: "$ndays
-echo "Groups: "$groups
+## MULTITASK GP
+#ndays=$(($PBS_ARRAYID))
+#echo "Number of days: "$ndays
+#echo "Groups: "$groups
 #python -u run_mgp.py --model mgpy --dtrain $ndays --dval 0 --dstart 60 --groups $groups
 
 
-# VANILLA GP
-# lead=$(($PBS_ARRAYID))
-# model="gpy"  # should line up with mdls/{}.py
+VANILLA GP
+lead=$(($PBS_ARRAYID))
+model="gpy"  # should line up with mdls/{}.py
+
+python -u run_gp.py --lead $lead --model gpy --dtrain $ndays --dval 0 --dstart 60 --groups $groups --save_pt
+
 # echo "Lead: "$lead", model: "$model
 
 # # dstart=60 Corresponds to March 1st, 2020
