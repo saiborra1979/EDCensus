@@ -149,7 +149,7 @@ class mdl():
                 print('Iter %d/%d - Loss: %.3f, ldiff: %.4f' % (i + 1, max_iter, ll, ldiff))
             optimizer.step()
             torch.cuda.empty_cache()
-        print('\n'.join([f"{name}: {param.item():0.3f}" for name, param in self.gp.named_parameters()]))
+        #print('\n'.join([f"{name}: {param.item():0.3f}" for name, param in self.gp.named_parameters()]))
         # Get internal fit
         self.gp.eval()
         self.likelihood.eval()

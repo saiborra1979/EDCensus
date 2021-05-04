@@ -7,19 +7,85 @@ import pandas as pd
 import numpy as np
 from plotnine import *
 from sklearn.metrics import r2_score
+from funs_support import find_dir_olu, gg_save
 
 dir_base = os.getcwd()
-dir_output = os.path.join(dir_base, '..', 'output')
+dir_olu = find_dir_olu()
+dir_figures = os.path.join(dir_olu, 'figures', 'census')
+dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
-dir_figures = os.path.join(dir_base, '..', 'figures')
+dir_dtrain = os.path.join(dir_test, 'dtrain')
+assert os.path.exists(dir_dtrain)
 
 ##################################
 # --- (1) COMPARE DTRAIN 1-7 --- #
 # Note: Validation days are zero
 
+cn_gg = ['model','groups','dtrain','lead']
+cn_desc = ['mean','std','25%','75%']
+lbl_desc = ['Mean','Std. Dev', 'Q25','Q75']
+di_desc = dict(zip(cn_desc,lbl_desc))
 
+fn_dtrain = pd.Series(os.listdir(dir_dtrain))
 
+holder = []
+for fn in fn_dtrain:
+    holder.append(pd.read_csv(os.path.join(dir_dtrain, fn)))
+df_iter = pd.concat(holder).reset_index(None,True)
+df_iter = df_iter.assign(dtrain=lambda x: (x.ntrain/24).astype(int),
+        date=lambda x: pd.to_datetime(x.date)).drop(columns='ntrain')
+assert df_iter.groupby(['model','groups','dtrain','lead']).size().unique().shape[0] == 1
+# Find the overlapping leads
+tmp = df_iter.groupby(['model','groups','lead']).size().reset_index().lead.value_counts()
+leads = np.sort(tmp[tmp > 1].index)
+df_iter = df_iter.query('lead.isin(@leads) & dtrain>1').reset_index(None,True)
+ntrain = df_iter.dtrain.unique()
+
+# Aggregate R2
+dat_r2_agg = df_iter.groupby(cn_gg).apply(lambda x: r2_score(x.y,x.pred)).reset_index().rename(columns={0:'r2'})
+dat_r2_agg[['dtrain','lead']] = dat_r2_agg[['dtrain','lead']].apply(pd.Categorical,0)
+
+# Variations in daily performance
+dat_r2_daily = df_iter.groupby(cn_gg+['date']).apply(lambda x: r2_score(x.y,x.pred)).reset_index().rename(columns={0:'r2'})
+qq = dat_r2_daily.query('model=="mgpy" & dtrain==3').copy()
+dat_r2_daily = dat_r2_daily.groupby(cn_gg).r2.describe()[cn_desc].reset_index()
+dat_r2_daily[['dtrain','lead']] = dat_r2_daily[['dtrain','lead']].apply(pd.Categorical,0)
+dat_r2_daily = dat_r2_daily.melt(cn_gg,None,'moment','r2')
+
+fn_dtrain[fn_dtrain.str.contains('mgpy')].to_list()
+fn_tmp = 'res_mgpy_dstart_60_dtrain_2_dval_0_groups_mds-arr-CTAS.csv'
+res_tmp = pd.read_csv(os.path.join(dir_dtrain, fn_tmp)).drop(columns=['model','ntrain','groups'])
+res_tmp = res_tmp.query('date==date.min()')
+res_tmp
+res_tmp.query('date==date.min()').groupby('lead').apply(lambda x: r2_score(x.y,x.pred))
+res_tmp.query('date==date.min()').groupby('hour').apply(lambda x: r2_score(x.y,x.pred))
+
+#######################
+# --- (2) PLOT IT --- #
+
+shpz = list('$'+pd.Series(ntrain).astype(str)+'$')
+
+posd = position_dodge(0.5)
+gg_r2_agg = (ggplot(dat_r2_agg,aes(x='lead',y='r2',color='model',shape='dtrain')) + 
+    theme_bw() + geom_point(position=posd,size=2.5) + 
+    scale_shape_manual(values=shpz) + 
+    scale_color_discrete(name='Model',labels=['GP','MultiTask']) + 
+    guides(shape=False) + 
+    ggtitle('Numbers indicate training days') + 
+    labs(y='R-squared',x='Forecasting horizon (hours)') + 
+    ggtitle('Aggregated R2 between models/training days'))
+gg_save('gg_r2_agg.png',dir_figures,gg_r2_agg,8,5)
+
+gg_r2_desc = (ggplot(dat_r2_daily,aes(x='lead',y='r2',color='model',shape='dtrain')) + 
+    theme_bw() + geom_point(position=posd,size=2.0) + 
+    facet_wrap('~moment',labeller=labeller(moment=di_desc),scales='free_y') + 
+    theme(subplots_adjust={'wspace': 0.25}) + 
+    guides(shape=False) + 
+    scale_color_discrete(name='Model',labels=['GP','MultiTask']) + 
+    labs(y='R-squared',x='Forecasting horizon (hours)') + 
+    scale_shape_manual(values=shpz))
+gg_save('gg_r2_desc.png',dir_figures,gg_r2_desc,12,8)
 
 
 
