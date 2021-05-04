@@ -21,14 +21,14 @@ from scipy.stats import norm
 
 def get_date_range(x):
     assert isinstance(x,pd.Series)
-    x = x.describe()
-    check = 'first' in x.index
-    if not check:
-        return None
-    else:
-        x = x[['first','last']].dt.strftime('%b %d , %H%P').str.cat(sep=' - ')
-        x = '(' + x + ')'
+    dfmt = '%b %d , %H%P'
+    if len(x) > 0:
+        xmi, xmx = x.min(), x.max()
+        x = '(' + xmi.strftime(dfmt) + ' - ' + xmx.strftime(dfmt) + ')'
         return x
+    else:
+        return None
+    
 
 def stopifnot(stmt,msg):
     if not stmt:
