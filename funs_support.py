@@ -18,6 +18,18 @@ from itertools import repeat
 
 from scipy.stats import norm
 
+
+def get_date_range(x):
+    assert isinstance(x,pd.Series)
+    x = x.describe()
+    check = 'first' in x.index
+    if not check:
+        return None
+    else:
+        x = x[['first','last']].dt.strftime('%b %d , %H%P').str.cat(sep=' - ')
+        x = '(' + x + ')'
+        return x
+
 def stopifnot(stmt,msg):
     if not stmt:
         print(msg)
