@@ -61,7 +61,6 @@ dates = df_lead_lags.index.to_frame().astype(str).assign(
     date=lambda x: pd.to_datetime(x.year + '-' + x.month + '-' + x.day + ' ' + x.hour + ':00:00')).date
 # Extract y (lead_0 is the current value)
 yval = df_lead_lags.loc[:, idx[:, 'lead_0']].values.flatten()
-
 # Remove lags (GP handles them automatically in the kernel)
 Xmat = df_lead_lags.loc[:, idx[:, 'lag_0']].droplevel(1, 1)
 cn = list(Xmat.columns)
@@ -98,7 +97,7 @@ gp = mdl(model=model, lead=lead, cn=cn, device=device, groups=groups)
 offset_lead = pd.DateOffset(hours=lead)
 offset_train = pd.DateOffset(days=dtrain)
 # Total number of hours
-holder_ii, holder_state, stime = [], [], time()
+holder_ii, stime = [], time()
 for ii in range(nhours):
     # (i) Set up the time ranges
     time_ii = dmin + pd.DateOffset(hours=ii)
@@ -111,11 +110,11 @@ for ii in range(nhours):
     dates_train = dates[idx_train].values
     dy_train = pd.DataFrame({'dates':dates_train,'y':yval[idx_train]})
     dy_train = dy_train.assign(y_lead=lambda x: x.y.shift(-lead)).dropna()
-    y_train = dy_train.y_lead.astype(int)
+    dy_train.y_lead = dy_train.y_lead.astype(int)
+    y_train = dy_train.y_lead.values
     X_train = Xmat[idx_train][dy_train.index.values].copy()
     X_test = Xmat[idx_test].copy()
     print('Training range: %s' % (get_date_range(dy_train.dates)))    
-
     # (ii) Fit the model
     gp.fit(X=X_train, y=y_train)  # Initialize model
     if ii > 0:
@@ -124,8 +123,7 @@ for ii in range(nhours):
     torch.cuda.empty_cache()
     holder_state = gp.gp.state_dict().copy()  # Make copy of weights
     res = gp.predict(X=X_test).assign(time=time_ii,hour=hour,lead=lead)
-    print(res)
-
+    
     # (iii) Save and run time
     fn_state = gp.fn.replace('.pkl',suffix+'_day_'+time_ii.strftime('%Y%m%d')+'.pth')
     if save_pt:
@@ -135,8 +133,6 @@ for ii in range(nhours):
     rate = (ii+1) / nsec
     eta_min = nleft/rate/60
     print('ETA: %0.1f minutes, for %i remaining' % (eta_min, nleft))
-    if ii > 115:
-        break
 
 ####################################
 # --- STEP 3: SAVE PREDICTIONS --- #
@@ -153,20 +149,17 @@ df_res = df_res.assign(model=model, groups=sgroups, dtrain=dtrain)
 df_res.to_csv(os.path.join(dir_save, fn_res), index=False)
 print('End of script')
 
-from plotnine import *
-from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import r2_score
-dir_figures = os.path.join(dir_olu, 'figures', 'census')
+# from plotnine import *
+# from scipy.stats import pearsonr, spearmanr
+# from sklearn.metrics import r2_score
+# dir_figures = os.path.join(dir_olu, 'figures', 'census')
 
-tmp = df_res.assign(doy=lambda x: x.date_rt.dt.strftime('%y-%m-%d'))
-tmp.groupby('doy').apply(lambda x: 
-    pd.Series({'spearman':spearmanr(x.y,x.pred)[0],'r2':r2_score(x.y,x.pred)}))
+# tmp = df_res.assign(doy=lambda x: x.date_rt.dt.strftime('%y-%m-%d'))
+# tmp.groupby('doy').apply(lambda x: 
+#     pd.Series({'spearman':spearmanr(x.y,x.pred)[0],'r2':r2_score(x.y,x.pred)}))
 
-gg = (ggplot(df_res,aes(x='date_pred')) + theme_bw() + 
-    geom_point(aes(y='y'),color='black') + 
-    geom_line(aes(y='pred')) + 
-    scale_x_datetime(date_breaks='1 day'))
-gg.save(os.path.join(dir_figures, 'gg.png'),height=4,width=6)
-
-
-
+# gg = (ggplot(df_res,aes(x='date_pred')) + theme_bw() + 
+#     geom_point(aes(y='y'),color='black') + 
+#     geom_line(aes(y='pred')) + 
+#     scale_x_datetime(date_breaks='1 day'))
+# gg.save(os.path.join(dir_figures, 'gg.png'),height=4,width=6)
