@@ -1,14 +1,15 @@
+# Performs analysis on the most recent year-month-day folder
+
 import os
 import copy
 import math
 import pandas as pd
 import numpy as np
+from scipy.stats import spearmanr
 from plotnine import *
 from sklearn.metrics import r2_score
-
 from funs_support import ymdh2date, ymd2date, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
 from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls
-
 from mdls.gpy import gp_real
 import torch
 import gpytorch
@@ -45,14 +46,13 @@ lblz = ['≥0', '1', '2', '3']
 # --- (1) LOAD DATA --- #
 
 # (i) Load the real-time y
+cn_ymdh = ['year', 'month', 'day', 'hour']
 idx = pd.IndexSlice
 act_y = pd.read_csv(os.path.join(dir_flow, 'df_lead_lags.csv'), header=[0,1], index_col=[0,1,2,3])
 act_y = act_y.loc[:,idx['y','lead_0']].reset_index().droplevel(1,1)
-act_y = act_y.assign(dates=lambda x: ymdh2date(x)).drop(columns=cn_ymdh)
 act_y.rename(columns={'y':'y_rt'},inplace=True)
-# act_y = act_y.loc[:,idx['y']].reset_index().assign(dates=lambda x: ymdh2date(x))
-# act_y = act_y.drop(columns=cn_ymdh).melt('dates',None,'lead','y')
-# act_y.lead = act_y.lead.str.replace('lead_','').astype(int)
+act_y = act_y.assign(date_rt=ymdh2date(act_y)).drop(columns=cn_ymdh)[['date_rt','y_rt']]
+
 
 # (ii) Find the most recent folder with GPY results
 fn_test = pd.Series(os.listdir(dir_test))
@@ -86,163 +86,52 @@ assert len(dat_recent.groups.unique()) == 1
 assert len(dat_recent.dtrain.unique()) == 1
 dat_recent.drop(columns = ['model','groups','dtrain'], inplace=True)
 dat_recent = dat_recent.sort_values(['lead','date_rt']).reset_index(None,True)
+# Add on the date columns
+dat_recent = dat_recent.assign(doy=lambda x: x.date_rt.dt.strftime('%Y-%m-%d'),
+    woy=lambda x: x.date_rt.dt.weekofyear,
+    year=lambda x: x.date_rt.dt.year, month=lambda x: x.date_rt.dt.month)
+dat_recent = dat_recent.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
 
-# # (iv) Load the kernel weights
-# path_kernel = os.path.join(dir_flow,'dat_kernel.csv')
-# preload_kernel = True
-# if preload_kernel:
-#     dat_kernel = pd.read_csv(path_kernel)
-# else:
-#     assert 'pt' in list(fn_recent) # Check that coefficient weights are to be found
-#     fold_pt = os.path.join(path_recent, 'pt')
-#     fn_pt = pd.Series(os.listdir(fold_pt))
-#     n_pt = len(fn_pt)
-#     print('A total of %i model weights were found' % n_pt)
-#     holder = []
-#     for i, fn in enumerate(fn_pt):
-#         if (i+1) % 50 == 0:
-#             print('Kernel %i of %i' % (i+1, n_pt))
-#         tmp_dict = torch.load(os.path.join(fold_pt,fn),map_location=device)
-#         keys = list(tmp_dict.keys())
-#         vals = torch.cat([v.flatten() for v in tmp_dict.values()]).detach().numpy()
-#         day = fn.split('day_')[1].replace('.pth','')
-#         lead = int(fn.split('lead_')[1].split('_dstart')[0])
-#         tmp_df = pd.DataFrame({'dates':day, 'lead':lead, 'kernel':keys,'value':vals})
-#         holder.append(tmp_df)
-#     # Merge and save
-#     dat_kernel = pd.concat(holder).reset_index(None,True)
-#     dat_kernel['dates'] = pd.to_datetime(dat_kernel.dates)
-#     # Apply the constraint transformer
-#     dat_kernel.rename(columns = {'value':'raw'},errors='ignore', inplace=True)
-#     dat_kernel['value'] = dat_kernel.raw.copy()
-#     mdl_attr = pd.Series(dat_kernel.kernel.unique())  # Model attributes
-#     u_attr = mdl_attr.copy()
-#     mdl_attr = mdl_attr[mdl_attr != 'mean.constant']  # Only term without a constraint
-#     tt_attr = mdl_attr.str.split('\\.',1,True).iloc[:,0].str.split('\\_',2,True).iloc[:,2].fillna('noise')
-#     tt_attr = np.setdiff1d(tt_attr.unique(),['noise'])
-#     print('GP uses the following feature types (tt): %s' % (', '.join(tt_attr)))
-#     # Load in the model
-#     n_samp = 50
-#     x_samp = torch.tensor(np.random.randn(n_samp,2),dtype=torch.float32)
-#     y_samp = torch.tensor(np.random.randn(n_samp),dtype=torch.float32)
-#     ll_samp = gpytorch.likelihoods.GaussianLikelihood()
-#     tt_samp = pd.Series(['trend','flow','date','mds','arr','CTAS'])
-#     idx_samp = range(len(tt_samp))
-#     cidx_samp = pd.DataFrame({'tt':tt_attr,'cn':'x'+tt_attr,'idx':idx_samp,'pidx':idx_samp})
-#     mdl_gp = gp_real(train_x=x_samp, train_y=y_samp, likelihood=ll_samp, cidx=cidx_samp)
-#     mdl_gp.load_state_dict(torch.load(os.path.join(fold_pt,fn_pt[0]),map_location=device))
-#     mdl_gp.training = False
-#     for param in mdl_gp.parameters():  # Turn off auto-grad
-#         param.requires_grad = False
-#     # Get the constraint for each hyperparameter
-#     di_constraint = {}
-#     for attr in mdl_attr:
-#         terms = attr.split('.')
-#         tmp_attr = copy.deepcopy(mdl_gp)
-#         for j, term in enumerate(terms):
-#             if j+1 < len(terms):
-#                 tmp_attr = getattr(tmp_attr,term)
-#             else:
-#                 tmp_constraint = getattr(tmp_attr,term+'_constraint')
-#                 tmp_attr = getattr(tmp_attr,term)            
-#         di_constraint[attr] = tmp_constraint
-#         # Assign the transformed values
-#         idx_attr = np.where(dat_kernel.kernel == attr)[0]
-#         raw_tens = torch.tensor(dat_kernel.loc[idx_attr,'raw'].values,dtype=torch.float32)
-#         dat_kernel.loc[idx_attr,'value'] = di_constraint[attr].transform(raw_tens).numpy()
-#     # Format the types
-#     di_cn = u_attr.str.split('\\_',2,True).iloc[:,2].str.split('\\.',1,True).iloc[:,0].fillna('constant')
-#     di_cn = dict(zip(u_attr,di_cn))
-#     di_kern = u_attr.str.split('\\_',2,True).iloc[:,1].fillna('constant').replace('covar.raw','noise')
-#     di_kern = dict(zip(u_attr,di_kern))
-#     di_coef = u_attr.str.split('\\.',2,True).apply(lambda x: x[x.notnull().sum()-1],1).str.replace('raw_','')
-#     di_coef = dict(zip(u_attr,di_coef))
-#     di_lvl = u_attr.str.split('\\_',1,True).iloc[:,0]
-#     di_lvl = dict(zip(u_attr,di_lvl))
-#     # Apply to data.frame
-#     dat_kernel['cn'] = dat_kernel.kernel.map(di_cn)
-#     dat_kernel['kern'] = dat_kernel.kernel.map(di_kern)
-#     dat_kernel['coef'] = dat_kernel.kernel.map(di_coef)
-#     dat_kernel['lvl'] = dat_kernel.kernel.map(di_lvl)
-#     # Check that these four levels covers all permuatiosn
-#     assert dat_kernel.groupby(['cn','kern','coef','lvl']).size().unique().shape[0] == 1
-#     print('Saving dat_kernel for later')
-#     dat_kernel.to_csv(path_kernel,index=False)
-# # Ensure its datetime
-# dat_kernel.dates = pd.to_datetime(dat_kernel.dates)
+# Merge real-time y's
+dat_recent = dat_recent.merge(act_y,'left')
 
-#####################################
-# --- (2) R-SQUARED PERFORMANCE --- #
-
-# (i) Daily R2 trend: 7 day rolling average
-df_r2 = pd.concat([dat_recent,date2ymd(dat_recent.dates)],1).groupby(cn_ymd+['lead']).apply(lambda x: r2_score(x.y, x.pred))
-df_r2 = df_r2.reset_index().rename(columns={0: 'r2'})
-# Get a 7 day average
-df_r2 = df_r2.assign(trend=lambda x: x.groupby('lead').r2.rolling(window=7,center=True).mean().values)
-df_r2 = df_r2.assign(date = ymd2date(df_r2), leads=lambda x: (x.lead-1)//6+1)
-tmp0 = pd.Series(range(1,25))
-tmp1 = (((tmp0-1) // 6)+1)
-tmp2 = ((tmp1-1)*6+1).astype(str) + '-' + (tmp1*6).astype(str)
-di_leads = dict(zip(tmp1, tmp2))
-df_r2.leads = pd.Categorical(df_r2.leads.map(di_leads),list(di_leads.values()))
-
-### DAILY R2 TREND ###
-gg_r2_best = (ggplot(df_r2, aes(x='date', y='trend', color='lead', groups='lead.astype(str)')) +
-              theme_bw() + labs(y='R-squared') + geom_line() +
-              theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90),
-                    subplots_adjust={'wspace': 0.25}) +
-              ggtitle('Daily R2 performance by lead (7 day rolling average)') +
-              scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
-              scale_color_cmap(name='Lead',cmap_name='viridis') +
-              facet_wrap('~leads',labeller=label_both))
-gg_save('gg_r2_best.png',dir_figures,gg_r2_best,13,8)
-
-######################################
-# --- (3) KERNEL HYPERPARAMETERS --- #
-
-n_hour = 24*3
-
-n_kern = dat_kernel.groupby(['cn','kern','coef','lvl']).size().reset_index()
-
-for i, r in n_kern.iterrows():
-    print('row %i of %i' % (i+1,len(n_kern)))
-    cn, kern, coef, lvl = r['cn'], r['kern'], r['coef'], r['lvl']
-    tmp_data = dat_kernel.query('cn==@cn & kern==@kern & coef==@coef & lvl==@lvl')[cn_keep].reset_index(None,True)
-    tmp_data = tmp_data.assign(qlead=lambda x: pd.cut(x.lead,range(0,25,6)))
-    tmp_fn = 'cn-'+cn+'_'+'kern-'+kern+'_'+'coef-'+coef+'_'+'lvl-'+lvl+'.png'
-    gtit = 'cn='+cn+', '+'kern='+kern+', '+'coef='+coef+', '+'lvl='+lvl
-    gg_tmp = (ggplot(tmp_data,aes(x='dates',y='value',color='lead')) + 
-              theme_bw() + geom_line() + ggtitle(gtit) + 
-              scale_color_cmap(name='Lead') + 
-              facet_wrap('~qlead',nrow=2) + 
-              theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-              scale_x_datetime(date_breaks='2 month', date_labels='%b, %Y'))
-    gg_save(tmp_fn,dir_kernel,gg_tmp,10,8)
-
-daily_y = act_y.assign(mu=lambda x: x.y_rt.rolling(n_hour).mean(), se=lambda x: x.y_rt.rolling(n_hour).std(1)).dropna()
-daily_y = daily_y.assign(y=lambda x: (x.y_rt-x.mu)/x.se, dates=lambda x: x.dates.dt.strftime('%Y-%m-%d'))
-daily_y = daily_y.groupby('dates').y.mean().reset_index().assign(dates=lambda x: pd.to_datetime(x.dates))
-
-cn_keep = ['dates','lead','value']
-# (i) Does distribution in means align with actual y data?
-dat_const = dat_kernel.query('cn=="constant"')[cn_keep].merge(daily_y)
-# dat_const = dat_const.melt(['dates','lead'],['value','y'],'tt')
-
-gg_const = (ggplot(dat_const,aes(x='y',y='value')) + 
-    theme_bw() + geom_point(size=0.5,alpha=0.5,color='blue') + 
-    facet_wrap('~lead',labeller=label_both,ncol=6))
-gg_save('gg_const.png',dir_kernel,gg_const,16,10)
-
-
-################################
-# --- (4) PRECISION/RECALL --- #
-
-posd = position_dodge(0.5)
-
+# Get the y-ranges
 ymi, ymx = dat_recent.pred.min()-1, dat_recent.pred.max()+1
+ymi, ymx = min(ymi, act_y.y_rt.min()), max(ymx, act_y.y_rt.max())
 esc_bins = [ymi - 1, 31, 38, 48, ymx + 1]
 esc_lbls = ['≤30', '31-37', '38-47', '≥48']
 esc_lvls = [0,1,2,3]
+
+# Calculate the different escalation levels
+
+cn_esc = ['date_rt','y_rt','y'] #,'date_pred'
+act_esc = dat_recent[cn_esc].copy()
+tmp = act_esc[['y_rt','y']].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
+act_esc = pd.concat([act_esc,tmp.rename(columns={'y':'esc','y_rt':'esc_rt'})],1)
+act_esc = act_esc.assign(esc = lambda x: x.esc - x.esc_rt)
+act_esc = act_esc.assign(woy=lambda x: x.date_rt.dt.weekofyear,
+    year=lambda x: x.date_rt.dt.year,month=lambda x: x.date_rt.dt.month)
+act_esc = act_esc.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
+
+######################################
+# --- (2) FACTORS OF PERFORMANCE --- #
+
+# (i) Spearman performance
+perf_rho = dat_recent.groupby(['lead','year','doy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
+perf_rho = perf_rho.reset_index().rename(columns={0:'rho'}).assign(doy=lambda x: pd.to_datetime(x.doy))
+perf_rho = perf_rho.assign(woy=lambda x: x.doy.dt.weekofyear,month=lambda x: x.doy.dt.month)
+perf_rho = perf_rho.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
+
+
+# (ii) (a) Average level changes, (b) number of escalations, (c) number of esc jumps > 1
+act_esc
+
+################################
+# --- (3) PRECISION/RECALL --- #
+
+posd = position_dodge(0.5)
+
+
 
 # Calculate the change in escalation levels
 # Need to add the real time y (current y is the predicted y)
@@ -355,8 +244,11 @@ gg_pr_agg = (ggplot(tmp, aes(x='sens',y='prec',color='lead',group='lead')) +
             legend_background=element_blank(),legend_key_size=10))
 gg_save('gg_pr_agg.png',dir_figures,gg_pr_agg,5,4)
 
-tmp = df_pr.query('month>0 & year>0').assign(ymon=lambda x: (x.year+x.month/10).astype(str))
-gg_pr_month = (ggplot(tmp, aes(x='sens',y='prec',color='ymon',group='ymon')) +
+# Precision recall for year/month
+tmp1 = df_pr.query('month>0 & year>0').reset_index(None, True)
+tmp1 = tmp1.assign(ymon1=lambda x: (x.year+x.month/100).astype(str))
+
+gg_pr_month = (ggplot(tmp1, aes(x='sens',y='prec',color='ymon1',group='ymon1')) +
     theme_bw() + geom_line() + 
     labs(x='Recall',y='Precision') +
     geom_abline(slope=-1,intercept=1,linetype='--') +
@@ -368,6 +260,60 @@ gg_pr_month = (ggplot(tmp, aes(x='sens',y='prec',color='ymon',group='ymon')) +
     theme(legend_direction='horizontal',legend_position='bottom'))
 gg_save('gg_pr_month.png',dir_figures,gg_pr_month,16,12)
 
+# Relationship between average precision
+gg = ['ymon','lead','metric']
+tmp2 = tmp1.assign(ymon=lambda x: pd.to_datetime(x.year.astype(str)+'-'+x.month.astype('str')+'-01'))
+tmp2 = tmp2.melt(['ymon','lead'],['prec','sens'])
+tmp2 = tmp2.groupby(gg).value.apply(lambda x: 
+    pd.Series({'mu':x.mean(),'lb':x.quantile(0.25),'ub':x.quantile(0.75)})).reset_index()
+tmp2 = tmp2.pivot_table('value',gg,'level_'+str(len(gg))).reset_index()
+
+gg_pr_mu = (ggplot(tmp2, aes(x='ymon',y='mu',color='metric')) + 
+    theme_bw() + geom_point() + 
+    geom_linerange(aes(ymin='lb',ymax='ub')) + 
+    facet_wrap('~lead',labeller=label_both,nrow=4) + 
+    labs(x='Year.Month',y='Precision/Recall') + 
+    geom_hline(yintercept=0.5,linetype='--') + 
+    ggtitle('IQR of Precision/Recall curve around average') + 
+    scale_x_datetime(date_breaks='1 month',date_labels='%b, %y') + 
+    scale_color_discrete(name='Metric',labels=['Precision','Recall']) + 
+    theme(axis_text_x=element_text(angle=90),axis_title_x=element_blank()))
+gg_save('gg_pr_mu.png',dir_figures,gg_pr_mu,18,10)
+
+# Relationship of average precision to number of labels
+tmp3 = res_sp_month.query('pred==1 & lead > 1')
+tmp3.groupby(['year','month']).size()
+tmp3 = tmp3.assign(ymon=lambda x: pd.to_datetime(x.year.astype(str)+'-'+x.month.astype('str')+'-01'))
+tmp3.drop(columns=['pred','value','year','month'],inplace=True)
+tmp3.query('ymon=="2020-04-01"')
+tmp4 = tmp2.drop(columns=['lb','ub']).merge(tmp3,'inner',['ymon','lead','metric'])
+tmp5 = tmp4.query('ymon>="2021"').assign(lbl=lambda x: x.ymon.dt.strftime('%b, %y'))
+
+gg_pr_n = (ggplot(tmp4,aes(x='den',y='mu',color='metric')) + 
+    theme_bw() + geom_point() + 
+    labs(x='Number of labels',y='Average precision/recall') + 
+    facet_wrap('~lead',labeller=label_both,nrow=4) + 
+    ggtitle('Over 13 test year/months') + 
+    geom_smooth(method='lm',se=False) + 
+    scale_color_discrete(name='Metric',labels=['Precision','Recall']) + 
+    geom_text(aes(label='lbl'),data=tmp5,size=8) + 
+    geom_hline(yintercept=0.5,linetype='--'))
+gg_save('gg_pr_n.png',dir_figures,gg_pr_n,18,10)
+
+
+
+#######################
+# --- (4) FIGURES --- #
+
+
+
+
+
+
+
+
+
+
 # # Stability or recall by threshold
 # tmp = df_pr.query('month>0').assign(p=lambda x: pd.Categorical(x.p))
 # gg_recall_thresh = (ggplot(tmp,aes(x='p',y='sens')) + theme_bw() + 
@@ -375,3 +321,152 @@ gg_save('gg_pr_month.png',dir_figures,gg_pr_month,16,12)
 #     facet_wrap('~lead',labeller=label_both) + 
 #     ggtitle('Stability of precision across months'))
 # gg_save('gg_recall_thresh.png',dir_figures,gg_recall_thresh,16,12)
+
+####################################################################
+
+
+# # (iv) Load the kernel weights
+# path_kernel = os.path.join(dir_flow,'dat_kernel.csv')
+# preload_kernel = True
+# if preload_kernel:
+#     dat_kernel = pd.read_csv(path_kernel)
+# else:
+#     assert 'pt' in list(fn_recent) # Check that coefficient weights are to be found
+#     fold_pt = os.path.join(path_recent, 'pt')
+#     fn_pt = pd.Series(os.listdir(fold_pt))
+#     n_pt = len(fn_pt)
+#     print('A total of %i model weights were found' % n_pt)
+#     holder = []
+#     for i, fn in enumerate(fn_pt):
+#         if (i+1) % 50 == 0:
+#             print('Kernel %i of %i' % (i+1, n_pt))
+#         tmp_dict = torch.load(os.path.join(fold_pt,fn),map_location=device)
+#         keys = list(tmp_dict.keys())
+#         vals = torch.cat([v.flatten() for v in tmp_dict.values()]).detach().numpy()
+#         day = fn.split('day_')[1].replace('.pth','')
+#         lead = int(fn.split('lead_')[1].split('_dstart')[0])
+#         tmp_df = pd.DataFrame({'dates':day, 'lead':lead, 'kernel':keys,'value':vals})
+#         holder.append(tmp_df)
+#     # Merge and save
+#     dat_kernel = pd.concat(holder).reset_index(None,True)
+#     dat_kernel['dates'] = pd.to_datetime(dat_kernel.dates)
+#     # Apply the constraint transformer
+#     dat_kernel.rename(columns = {'value':'raw'},errors='ignore', inplace=True)
+#     dat_kernel['value'] = dat_kernel.raw.copy()
+#     mdl_attr = pd.Series(dat_kernel.kernel.unique())  # Model attributes
+#     u_attr = mdl_attr.copy()
+#     mdl_attr = mdl_attr[mdl_attr != 'mean.constant']  # Only term without a constraint
+#     tt_attr = mdl_attr.str.split('\\.',1,True).iloc[:,0].str.split('\\_',2,True).iloc[:,2].fillna('noise')
+#     tt_attr = np.setdiff1d(tt_attr.unique(),['noise'])
+#     print('GP uses the following feature types (tt): %s' % (', '.join(tt_attr)))
+#     # Load in the model
+#     n_samp = 50
+#     x_samp = torch.tensor(np.random.randn(n_samp,2),dtype=torch.float32)
+#     y_samp = torch.tensor(np.random.randn(n_samp),dtype=torch.float32)
+#     ll_samp = gpytorch.likelihoods.GaussianLikelihood()
+#     tt_samp = pd.Series(['trend','flow','date','mds','arr','CTAS'])
+#     idx_samp = range(len(tt_samp))
+#     cidx_samp = pd.DataFrame({'tt':tt_attr,'cn':'x'+tt_attr,'idx':idx_samp,'pidx':idx_samp})
+#     mdl_gp = gp_real(train_x=x_samp, train_y=y_samp, likelihood=ll_samp, cidx=cidx_samp)
+#     mdl_gp.load_state_dict(torch.load(os.path.join(fold_pt,fn_pt[0]),map_location=device))
+#     mdl_gp.training = False
+#     for param in mdl_gp.parameters():  # Turn off auto-grad
+#         param.requires_grad = False
+#     # Get the constraint for each hyperparameter
+#     di_constraint = {}
+#     for attr in mdl_attr:
+#         terms = attr.split('.')
+#         tmp_attr = copy.deepcopy(mdl_gp)
+#         for j, term in enumerate(terms):
+#             if j+1 < len(terms):
+#                 tmp_attr = getattr(tmp_attr,term)
+#             else:
+#                 tmp_constraint = getattr(tmp_attr,term+'_constraint')
+#                 tmp_attr = getattr(tmp_attr,term)            
+#         di_constraint[attr] = tmp_constraint
+#         # Assign the transformed values
+#         idx_attr = np.where(dat_kernel.kernel == attr)[0]
+#         raw_tens = torch.tensor(dat_kernel.loc[idx_attr,'raw'].values,dtype=torch.float32)
+#         dat_kernel.loc[idx_attr,'value'] = di_constraint[attr].transform(raw_tens).numpy()
+#     # Format the types
+#     di_cn = u_attr.str.split('\\_',2,True).iloc[:,2].str.split('\\.',1,True).iloc[:,0].fillna('constant')
+#     di_cn = dict(zip(u_attr,di_cn))
+#     di_kern = u_attr.str.split('\\_',2,True).iloc[:,1].fillna('constant').replace('covar.raw','noise')
+#     di_kern = dict(zip(u_attr,di_kern))
+#     di_coef = u_attr.str.split('\\.',2,True).apply(lambda x: x[x.notnull().sum()-1],1).str.replace('raw_','')
+#     di_coef = dict(zip(u_attr,di_coef))
+#     di_lvl = u_attr.str.split('\\_',1,True).iloc[:,0]
+#     di_lvl = dict(zip(u_attr,di_lvl))
+#     # Apply to data.frame
+#     dat_kernel['cn'] = dat_kernel.kernel.map(di_cn)
+#     dat_kernel['kern'] = dat_kernel.kernel.map(di_kern)
+#     dat_kernel['coef'] = dat_kernel.kernel.map(di_coef)
+#     dat_kernel['lvl'] = dat_kernel.kernel.map(di_lvl)
+#     # Check that these four levels covers all permuatiosn
+#     assert dat_kernel.groupby(['cn','kern','coef','lvl']).size().unique().shape[0] == 1
+#     print('Saving dat_kernel for later')
+#     dat_kernel.to_csv(path_kernel,index=False)
+# # Ensure its datetime
+# dat_kernel.dates = pd.to_datetime(dat_kernel.dates)
+
+#####################################
+# --- (2) R-SQUARED PERFORMANCE --- #
+
+# # (i) Daily R2 trend: 7 day rolling average
+# df_r2 = pd.concat([dat_recent,date2ymd(dat_recent.dates)],1).groupby(cn_ymd+['lead']).apply(lambda x: r2_score(x.y, x.pred))
+# df_r2 = df_r2.reset_index().rename(columns={0: 'r2'})
+# # Get a 7 day average
+# df_r2 = df_r2.assign(trend=lambda x: x.groupby('lead').r2.rolling(window=7,center=True).mean().values)
+# df_r2 = df_r2.assign(date = ymd2date(df_r2), leads=lambda x: (x.lead-1)//6+1)
+# tmp0 = pd.Series(range(1,25))
+# tmp1 = (((tmp0-1) // 6)+1)
+# tmp2 = ((tmp1-1)*6+1).astype(str) + '-' + (tmp1*6).astype(str)
+# di_leads = dict(zip(tmp1, tmp2))
+# df_r2.leads = pd.Categorical(df_r2.leads.map(di_leads),list(di_leads.values()))
+
+# ### DAILY R2 TREND ###
+# gg_r2_best = (ggplot(df_r2, aes(x='date', y='trend', color='lead', groups='lead.astype(str)')) +
+#               theme_bw() + labs(y='R-squared') + geom_line() +
+#               theme(axis_title_x=element_blank(), axis_text_x=element_text(angle=90),
+#                     subplots_adjust={'wspace': 0.25}) +
+#               ggtitle('Daily R2 performance by lead (7 day rolling average)') +
+#               scale_x_datetime(date_breaks='1 month', date_labels='%b, %Y') +
+#               scale_color_cmap(name='Lead',cmap_name='viridis') +
+#               facet_wrap('~leads',labeller=label_both))
+# gg_save('gg_r2_best.png',dir_figures,gg_r2_best,13,8)
+
+######################################
+# --- (3) KERNEL HYPERPARAMETERS --- #
+
+# n_hour = 24*3
+
+# n_kern = dat_kernel.groupby(['cn','kern','coef','lvl']).size().reset_index()
+
+# for i, r in n_kern.iterrows():
+#     print('row %i of %i' % (i+1,len(n_kern)))
+#     cn, kern, coef, lvl = r['cn'], r['kern'], r['coef'], r['lvl']
+#     tmp_data = dat_kernel.query('cn==@cn & kern==@kern & coef==@coef & lvl==@lvl')[cn_keep].reset_index(None,True)
+#     tmp_data = tmp_data.assign(qlead=lambda x: pd.cut(x.lead,range(0,25,6)))
+#     tmp_fn = 'cn-'+cn+'_'+'kern-'+kern+'_'+'coef-'+coef+'_'+'lvl-'+lvl+'.png'
+#     gtit = 'cn='+cn+', '+'kern='+kern+', '+'coef='+coef+', '+'lvl='+lvl
+#     gg_tmp = (ggplot(tmp_data,aes(x='dates',y='value',color='lead')) + 
+#               theme_bw() + geom_line() + ggtitle(gtit) + 
+#               scale_color_cmap(name='Lead') + 
+#               facet_wrap('~qlead',nrow=2) + 
+#               theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+#               scale_x_datetime(date_breaks='2 month', date_labels='%b, %Y'))
+#     gg_save(tmp_fn,dir_kernel,gg_tmp,10,8)
+
+# daily_y = act_y.assign(mu=lambda x: x.y_rt.rolling(n_hour).mean(), se=lambda x: x.y_rt.rolling(n_hour).std(1)).dropna()
+# daily_y = daily_y.assign(y=lambda x: (x.y_rt-x.mu)/x.se, dates=lambda x: x.dates.dt.strftime('%Y-%m-%d'))
+# daily_y = daily_y.groupby('dates').y.mean().reset_index().assign(dates=lambda x: pd.to_datetime(x.dates))
+
+# cn_keep = ['dates','lead','value']
+# # (i) Does distribution in means align with actual y data?
+# dat_const = dat_kernel.query('cn=="constant"')[cn_keep].merge(daily_y)
+# # dat_const = dat_const.melt(['dates','lead'],['value','y'],'tt')
+
+# gg_const = (ggplot(dat_const,aes(x='y',y='value')) + 
+#     theme_bw() + geom_point(size=0.5,alpha=0.5,color='blue') + 
+#     facet_wrap('~lead',labeller=label_both,ncol=6))
+# gg_save('gg_const.png',dir_kernel,gg_const,16,10)
