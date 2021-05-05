@@ -48,7 +48,7 @@ def ordinal_lbls(df, cn_date, cn_y, cn_y_rt, cn_pred, cn_se, level=0.5):
 # --- Function to get precision/recall for different levels --- #
 # -------------------------------------------------------------- #
 def prec_recall_lbls(df, cn_y, cn_y_rt, cn_pred, cn_idx, gg_nmax=50):
-    # df=dat_ord.copy();cn_y='y';cn_y_rt='y_rt';cn_pred='pred';cn_idx='dates';gg_nmax=50
+    # df=tmp.drop(columns=cn_drop);cn_y='y';cn_y_rt='y_rt';cn_pred='pred';cn_idx='date_rt';gg_nmax=50
     # del df, cn_y, cn_y_rt, cn_pred, cn_idx, gg_nmax, df_prec, df_sens, df_both, df_den
     df = df.copy()
     cn_check = [cn_y, cn_y_rt, cn_pred, cn_idx]

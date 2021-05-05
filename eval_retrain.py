@@ -3,11 +3,14 @@ SCRIPT TO DECOMPOSE MODEL RESULTS
 """
 
 import os
+import shutil
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from plotnine import *
 from sklearn.metrics import r2_score
-from funs_support import find_dir_olu, gg_save
+from scipy.stats import pearsonr, spearmanr
+from funs_support import find_dir_olu, gg_save, makeifnot
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -22,10 +25,13 @@ assert os.path.exists(dir_dtrain)
 # --- (1) COMPARE DTRAIN 1-7 --- #
 # Note: Validation days are zero
 
+# cn_desc = ['mean','std','25%','75%']
+# lbl_desc = ['Mean','Std. Dev', 'Q25','Q75']
+# di_desc = dict(zip(cn_desc,lbl_desc))
+
 cn_gg = ['model','groups','dtrain','lead']
-cn_desc = ['mean','std','25%','75%']
-lbl_desc = ['Mean','Std. Dev', 'Q25','Q75']
-di_desc = dict(zip(cn_desc,lbl_desc))
+cn_date = ['date_rt','date_pred']
+cn_cat = ['dtrain']
 
 fn_dtrain = pd.Series(os.listdir(dir_dtrain))
 
@@ -33,60 +39,86 @@ holder = []
 for fn in fn_dtrain:
     holder.append(pd.read_csv(os.path.join(dir_dtrain, fn)))
 df_iter = pd.concat(holder).reset_index(None,True)
-df_iter = df_iter.assign(dtrain=lambda x: (x.ntrain/24).astype(int),
-        date=lambda x: pd.to_datetime(x.date)).drop(columns='ntrain')
+df_iter[cn_date] = df_iter[cn_date].apply(pd.to_datetime)
 assert df_iter.groupby(['model','groups','dtrain','lead']).size().unique().shape[0] == 1
-# Find the overlapping leads
-tmp = df_iter.groupby(['model','groups','lead']).size().reset_index().lead.value_counts()
-leads = np.sort(tmp[tmp > 1].index)
-df_iter = df_iter.query('lead.isin(@leads) & dtrain>1').reset_index(None,True)
-ntrain = df_iter.dtrain.unique()
+dtrain = np.sort(df_iter.dtrain.unique())
+df_iter = df_iter.assign(woy=lambda x: x.date_rt.dt.weekofyear, year=lambda x: x.date_rt.dt.year)
 
-# Aggregate R2
-dat_r2_agg = df_iter.groupby(cn_gg).apply(lambda x: r2_score(x.y,x.pred)).reset_index().rename(columns={0:'r2'})
-dat_r2_agg[['dtrain','lead']] = dat_r2_agg[['dtrain','lead']].apply(pd.Categorical,0)
+# Aggregate R2/Correlation
+dat_r2_agg = df_iter.groupby(cn_gg).apply(lambda x: 
+    pd.Series({'r2':r2_score(x.y,x.pred), 'spearman': spearmanr(x.y,x.pred)[0],
+               'pearson':pearsonr(x.y,x.pred)[0]})).reset_index()
+dat_r2_agg[cn_cat] = dat_r2_agg[cn_cat].apply(pd.Categorical,0)
+dat_r2_agg = dat_r2_agg.melt(cn_gg,None,'msr')
 
-# Variations in daily performance
-dat_r2_daily = df_iter.groupby(cn_gg+['date']).apply(lambda x: r2_score(x.y,x.pred)).reset_index().rename(columns={0:'r2'})
-qq = dat_r2_daily.query('model=="mgpy" & dtrain==3').copy()
-dat_r2_daily = dat_r2_daily.groupby(cn_gg).r2.describe()[cn_desc].reset_index()
-dat_r2_daily[['dtrain','lead']] = dat_r2_daily[['dtrain','lead']].apply(pd.Categorical,0)
-dat_r2_daily = dat_r2_daily.melt(cn_gg,None,'moment','r2')
+# Variations in weekly performance
+cn_gg2 = cn_gg+['year','woy']
+dat_r2_weekly = df_iter.groupby(cn_gg2).apply(lambda x: 
+    pd.Series({'r2':r2_score(x.y,x.pred), 'spearman': spearmanr(x.y,x.pred)[0],
+               'pearson':pearsonr(x.y,x.pred)[0]})).reset_index()
+dat_r2_weekly = dat_r2_weekly.melt(cn_gg2,None,'msr')
+dat_r2_weekly = dat_r2_weekly.groupby(cn_gg+['msr']).value.apply(lambda x: 
+    pd.Series({'mu':x.mean(),'lb':x.quantile(0.25),'ub':x.quantile(0.75)}))
+dat_r2_weekly = dat_r2_weekly.reset_index().rename(columns={'level_'+str(len(cn_gg)+1):'metric'})
+# dat_r2_weekly = dat_r2_weekly.reset_index().pivot_table('value',cn_gg+['msr'],'level_'+str(len(cn_gg)+1)).reset_index()
+dat_r2_weekly[cn_cat] = dat_r2_weekly[cn_cat].apply(pd.Categorical,0)
+dat_r2_weekly.loc[0]
 
-fn_dtrain[fn_dtrain.str.contains('mgpy')].to_list()
-fn_tmp = 'res_mgpy_dstart_60_dtrain_2_dval_0_groups_mds-arr-CTAS.csv'
-res_tmp = pd.read_csv(os.path.join(dir_dtrain, fn_tmp)).drop(columns=['model','ntrain','groups'])
-res_tmp = res_tmp.query('date==date.min()')
-res_tmp
-res_tmp.query('date==date.min()').groupby('lead').apply(lambda x: r2_score(x.y,x.pred))
-res_tmp.query('date==date.min()').groupby('hour').apply(lambda x: r2_score(x.y,x.pred))
+####################################
+# --- (2) DETERMINE BEST MODEL --- #
+
+dat_best = dat_r2_weekly.query('msr=="r2" & metric=="mu"').reset_index(None,True).drop(columns=['msr','metric'])
+# Find the winning number of dtraining days by lead
+dat_best = dat_best.sort_values(['lead','value'],ascending=False).groupby('lead').head(1)
+
+today = datetime.now().strftime('%Y_%m_%d')
+dir_today = os.path.join(dir_test,today)
+makeifnot(dir_today)
+
+# Loop through and make a copy into the current day's folder
+for ii, rr in dat_best.iterrows():
+    pat = '_dtrain_'+str(rr['dtrain'])+'_'
+    tmp_fn = fn_dtrain[fn_dtrain.str.contains(pat)]
+    pat = '_lead_'+str(rr['lead'])+'_'
+    tmp_fn = list(tmp_fn[tmp_fn.str.contains(pat)])
+    assert len(tmp_fn) == 1
+    tmp_fn = tmp_fn[0]
+    path_from = os.path.join(dir_dtrain,tmp_fn)
+    path_to = os.path.join(dir_today, tmp_fn)
+    shutil.copy(path_from, path_to)
+
 
 #######################
-# --- (2) PLOT IT --- #
+# --- (3) PLOT IT --- #
 
-shpz = list('$'+pd.Series(ntrain).astype(str)+'$')
-
+shpz = list('$'+pd.Series(dtrain).astype(str)+'$')
 posd = position_dodge(0.5)
-gg_r2_agg = (ggplot(dat_r2_agg,aes(x='lead',y='r2',color='model',shape='dtrain')) + 
-    theme_bw() + geom_point(position=posd,size=2.5) + 
-    scale_shape_manual(values=shpz) + 
-    scale_color_discrete(name='Model',labels=['GP','MultiTask']) + 
-    guides(shape=False) + 
+
+# Daily
+tmp = dat_r2_agg.query('dtrain.astype("int")>3')
+gg_r2_agg = (ggplot(tmp,aes(x='lead',y='value',color='lead',shape='dtrain')) + 
+    theme_bw() + 
+    geom_point(position=posd,size=2.5) + 
+    scale_shape_manual(values=shpz) + guides(shape=False) + 
     ggtitle('Numbers indicate training days') + 
-    labs(y='R-squared',x='Forecasting horizon (hours)') + 
-    ggtitle('Aggregated R2 between models/training days'))
-gg_save('gg_r2_agg.png',dir_figures,gg_r2_agg,8,5)
+    labs(y='Performance measure',x='Forecasting horizon (hours)') + 
+    ggtitle('R2/correlation by training days/leads') + 
+    geom_hline(yintercept=0,linetype='--') + 
+    facet_wrap('~msr',nrow=1))
+gg_save('gg_r2_agg.png',dir_figures,gg_r2_agg,12,4)
 
-gg_r2_desc = (ggplot(dat_r2_daily,aes(x='lead',y='r2',color='model',shape='dtrain')) + 
-    theme_bw() + geom_point(position=posd,size=2.0) + 
-    facet_wrap('~moment',labeller=labeller(moment=di_desc),scales='free_y') + 
-    theme(subplots_adjust={'wspace': 0.25}) + 
+# Moments of weekly
+tmp = dat_r2_weekly.query('dtrain.astype("int")>3')
+gg_r2_desc = (ggplot(tmp,aes(x='lead',y='value',color='lead',shape='dtrain')) + 
+    theme_bw() + 
+    geom_point(position=posd) + 
+    facet_grid('metric~msr') + 
     guides(shape=False) + 
-    scale_color_discrete(name='Model',labels=['GP','MultiTask']) + 
-    labs(y='R-squared',x='Forecasting horizon (hours)') + 
-    scale_shape_manual(values=shpz))
-gg_save('gg_r2_desc.png',dir_figures,gg_r2_desc,12,8)
-
+    labs(y='Performance measure',x='Forecasting horizon (hours)') + 
+    scale_shape_manual(values=shpz) + 
+    geom_hline(yintercept=0,linetype='--') + 
+    ggtitle('Weekly performance range (IQR and mean)'))
+gg_save('gg_r2_desc.png',dir_figures,gg_r2_desc,12,10)
 
 
 # ############################################

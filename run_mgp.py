@@ -16,7 +16,7 @@ groups = None
 if hasattr(args, 'groups'):
     groups = args.groups
 
-# model, dstart, groups, dtrain, dval, save_pt = 'mgpy', 60, ['mds','arr','CTAS'], 3, 0, False
+model, dstart, groups, dtrain, dval, save_pt = 'mgpy', 60, ['mds','arr','CTAS'], 3, 0, False
 
 import os
 import sys
@@ -122,21 +122,25 @@ for day, s_test in enumerate(d_pred):
     Xmat_test, Ymat_test = Xmat[idx_test], Ymat[idx_test]
     ntrain, nval, ntest = Xmat_train.shape[0], Xmat_valid.shape[0], Xmat_test.shape[0]
     print('Training size: %i, validation size: %i, test size: %i' % (ntrain, nval, ntest))
-    # Combine train/validation for GP
-    Xmat_tval = np.vstack([Xmat_train, Xmat_valid])
-    Ymat_tval = np.vstack([Ymat_train, Ymat_valid])
-    mgp.fit(X=Xmat_tval, Y=Ymat_tval)
+    Xmat_tval = np.vstack([Xmat_train, Xmat_test])
+    Ymat_tval = np.vstack([Ymat_train, Ymat_test])
+    mgp.fit(X=Xmat_train, Y=Ymat_train)
     if ii > 1:
         mgp.gp.load_state_dict(holder_state)  # Load state dict from previous iteration
     if ii == 2:
         btime = time()
     stime = time()
-    mgp.tune(max_iter=1000, lr=0.01, get_train=False)
+    mgp.tune(X=Xmat_tval, Y=Ymat_tval, max_iter=250, lr=0.01, get_train=False, n_check=251)
+    break
     torch.cuda.empty_cache()
     holder_state = mgp.gp.state_dict().copy()
     fn_state = mgp.fn.replace('.pkl',suffix+'_day_'+s_test.strftime('%Y%m%d')+'.pth')
     if save_pt:
         torch.save(holder_state, os.path.join(dir_save_pt,fn_state))
+    resX = mgp.predict(X=Xmat_test)
+    resX = resX.merge(pd.DataFrame(Ymat_test).rename_axis('idx').reset_index().melt('idx',None,'lead','y'))
+    resX.groupby('lead').apply(lambda x: r2_score(x.y, x.mu))
+
     res = mgp.predict(X=Xmat_test, Y=Ymat_test)
     res = res.assign(date=s_test).rename(columns={'idx':'hour'})
     holder.append(res)

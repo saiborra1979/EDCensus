@@ -73,101 +73,103 @@ path_recent = os.path.join(dir_test,fold_recent)
 fn_recent = pd.Series(os.listdir(path_recent))
 
 # (iii) Load the predicted/actual
+cn_dates = ['date_rt','date_pred']
 fn_res = fn_recent[fn_recent.str.contains('^res\\_.*\\.csv$')]
 holder = []
 for fn in fn_res:
     holder.append(pd.read_csv(os.path.join(path_recent,fn)))
 dat_recent = pd.concat(holder).reset_index(None,True)
-dat_recent.insert(0,'dates',pd.to_datetime(dat_recent.date + ' ' + dat_recent.hour.astype(str)+':00:00'))
+dat_recent[cn_dates] = dat_recent[cn_dates].apply(pd.to_datetime)
+# dat_recent.insert(0,'dates',pd.to_datetime(dat_recent.date + ' ' + dat_recent.hour.astype(str)+':00:00'))
 assert np.all(dat_recent.model == 'gpy')
 assert len(dat_recent.groups.unique()) == 1
-assert len(dat_recent.ntrain.unique()) == 1
-dat_recent.drop(columns = ['date','hour','model','groups','ntrain'], inplace=True)
-dat_recent = dat_recent.sort_values(['lead','dates']).reset_index(None,True)
+assert len(dat_recent.dtrain.unique()) == 1
+dat_recent.drop(columns = ['model','groups','dtrain'], inplace=True)
+dat_recent = dat_recent.sort_values(['lead','date_rt']).reset_index(None,True)
 
-# (iv) Load the kernel weights
-path_kernel = os.path.join(dir_flow,'dat_kernel.csv')
-preload_kernel = True
-if preload_kernel:
-    dat_kernel = pd.read_csv(path_kernel)
-else:
-    assert 'pt' in list(fn_recent) # Check that coefficient weights are to be found
-    fold_pt = os.path.join(path_recent, 'pt')
-    fn_pt = pd.Series(os.listdir(fold_pt))
-    n_pt = len(fn_pt)
-    print('A total of %i model weights were found' % n_pt)
-    holder = []
-    for i, fn in enumerate(fn_pt):
-        if (i+1) % 50 == 0:
-            print('Kernel %i of %i' % (i+1, n_pt))
-        tmp_dict = torch.load(os.path.join(fold_pt,fn),map_location=device)
-        keys = list(tmp_dict.keys())
-        vals = torch.cat([v.flatten() for v in tmp_dict.values()]).detach().numpy()
-        day = fn.split('day_')[1].replace('.pth','')
-        lead = int(fn.split('lead_')[1].split('_dstart')[0])
-        tmp_df = pd.DataFrame({'dates':day, 'lead':lead, 'kernel':keys,'value':vals})
-        holder.append(tmp_df)
-    # Merge and save
-    dat_kernel = pd.concat(holder).reset_index(None,True)
-    dat_kernel['dates'] = pd.to_datetime(dat_kernel.dates)
-    # Apply the constraint transformer
-    dat_kernel.rename(columns = {'value':'raw'},errors='ignore', inplace=True)
-    dat_kernel['value'] = dat_kernel.raw.copy()
-    mdl_attr = pd.Series(dat_kernel.kernel.unique())  # Model attributes
-    u_attr = mdl_attr.copy()
-    mdl_attr = mdl_attr[mdl_attr != 'mean.constant']  # Only term without a constraint
-    tt_attr = mdl_attr.str.split('\\.',1,True).iloc[:,0].str.split('\\_',2,True).iloc[:,2].fillna('noise')
-    tt_attr = np.setdiff1d(tt_attr.unique(),['noise'])
-    print('GP uses the following feature types (tt): %s' % (', '.join(tt_attr)))
-    # Load in the model
-    n_samp = 50
-    x_samp = torch.tensor(np.random.randn(n_samp,2),dtype=torch.float32)
-    y_samp = torch.tensor(np.random.randn(n_samp),dtype=torch.float32)
-    ll_samp = gpytorch.likelihoods.GaussianLikelihood()
-    tt_samp = pd.Series(['trend','flow','date','mds','arr','CTAS'])
-    idx_samp = range(len(tt_samp))
-    cidx_samp = pd.DataFrame({'tt':tt_attr,'cn':'x'+tt_attr,'idx':idx_samp,'pidx':idx_samp})
-    mdl_gp = gp_real(train_x=x_samp, train_y=y_samp, likelihood=ll_samp, cidx=cidx_samp)
-    mdl_gp.load_state_dict(torch.load(os.path.join(fold_pt,fn_pt[0]),map_location=device))
-    mdl_gp.training = False
-    for param in mdl_gp.parameters():  # Turn off auto-grad
-        param.requires_grad = False
-    # Get the constraint for each hyperparameter
-    di_constraint = {}
-    for attr in mdl_attr:
-        terms = attr.split('.')
-        tmp_attr = copy.deepcopy(mdl_gp)
-        for j, term in enumerate(terms):
-            if j+1 < len(terms):
-                tmp_attr = getattr(tmp_attr,term)
-            else:
-                tmp_constraint = getattr(tmp_attr,term+'_constraint')
-                tmp_attr = getattr(tmp_attr,term)            
-        di_constraint[attr] = tmp_constraint
-        # Assign the transformed values
-        idx_attr = np.where(dat_kernel.kernel == attr)[0]
-        raw_tens = torch.tensor(dat_kernel.loc[idx_attr,'raw'].values,dtype=torch.float32)
-        dat_kernel.loc[idx_attr,'value'] = di_constraint[attr].transform(raw_tens).numpy()
-    # Format the types
-    di_cn = u_attr.str.split('\\_',2,True).iloc[:,2].str.split('\\.',1,True).iloc[:,0].fillna('constant')
-    di_cn = dict(zip(u_attr,di_cn))
-    di_kern = u_attr.str.split('\\_',2,True).iloc[:,1].fillna('constant').replace('covar.raw','noise')
-    di_kern = dict(zip(u_attr,di_kern))
-    di_coef = u_attr.str.split('\\.',2,True).apply(lambda x: x[x.notnull().sum()-1],1).str.replace('raw_','')
-    di_coef = dict(zip(u_attr,di_coef))
-    di_lvl = u_attr.str.split('\\_',1,True).iloc[:,0]
-    di_lvl = dict(zip(u_attr,di_lvl))
-    # Apply to data.frame
-    dat_kernel['cn'] = dat_kernel.kernel.map(di_cn)
-    dat_kernel['kern'] = dat_kernel.kernel.map(di_kern)
-    dat_kernel['coef'] = dat_kernel.kernel.map(di_coef)
-    dat_kernel['lvl'] = dat_kernel.kernel.map(di_lvl)
-    # Check that these four levels covers all permuatiosn
-    assert dat_kernel.groupby(['cn','kern','coef','lvl']).size().unique().shape[0] == 1
-    print('Saving dat_kernel for later')
-    dat_kernel.to_csv(path_kernel,index=False)
-# Ensure its datetime
-dat_kernel.dates = pd.to_datetime(dat_kernel.dates)
+# # (iv) Load the kernel weights
+# path_kernel = os.path.join(dir_flow,'dat_kernel.csv')
+# preload_kernel = True
+# if preload_kernel:
+#     dat_kernel = pd.read_csv(path_kernel)
+# else:
+#     assert 'pt' in list(fn_recent) # Check that coefficient weights are to be found
+#     fold_pt = os.path.join(path_recent, 'pt')
+#     fn_pt = pd.Series(os.listdir(fold_pt))
+#     n_pt = len(fn_pt)
+#     print('A total of %i model weights were found' % n_pt)
+#     holder = []
+#     for i, fn in enumerate(fn_pt):
+#         if (i+1) % 50 == 0:
+#             print('Kernel %i of %i' % (i+1, n_pt))
+#         tmp_dict = torch.load(os.path.join(fold_pt,fn),map_location=device)
+#         keys = list(tmp_dict.keys())
+#         vals = torch.cat([v.flatten() for v in tmp_dict.values()]).detach().numpy()
+#         day = fn.split('day_')[1].replace('.pth','')
+#         lead = int(fn.split('lead_')[1].split('_dstart')[0])
+#         tmp_df = pd.DataFrame({'dates':day, 'lead':lead, 'kernel':keys,'value':vals})
+#         holder.append(tmp_df)
+#     # Merge and save
+#     dat_kernel = pd.concat(holder).reset_index(None,True)
+#     dat_kernel['dates'] = pd.to_datetime(dat_kernel.dates)
+#     # Apply the constraint transformer
+#     dat_kernel.rename(columns = {'value':'raw'},errors='ignore', inplace=True)
+#     dat_kernel['value'] = dat_kernel.raw.copy()
+#     mdl_attr = pd.Series(dat_kernel.kernel.unique())  # Model attributes
+#     u_attr = mdl_attr.copy()
+#     mdl_attr = mdl_attr[mdl_attr != 'mean.constant']  # Only term without a constraint
+#     tt_attr = mdl_attr.str.split('\\.',1,True).iloc[:,0].str.split('\\_',2,True).iloc[:,2].fillna('noise')
+#     tt_attr = np.setdiff1d(tt_attr.unique(),['noise'])
+#     print('GP uses the following feature types (tt): %s' % (', '.join(tt_attr)))
+#     # Load in the model
+#     n_samp = 50
+#     x_samp = torch.tensor(np.random.randn(n_samp,2),dtype=torch.float32)
+#     y_samp = torch.tensor(np.random.randn(n_samp),dtype=torch.float32)
+#     ll_samp = gpytorch.likelihoods.GaussianLikelihood()
+#     tt_samp = pd.Series(['trend','flow','date','mds','arr','CTAS'])
+#     idx_samp = range(len(tt_samp))
+#     cidx_samp = pd.DataFrame({'tt':tt_attr,'cn':'x'+tt_attr,'idx':idx_samp,'pidx':idx_samp})
+#     mdl_gp = gp_real(train_x=x_samp, train_y=y_samp, likelihood=ll_samp, cidx=cidx_samp)
+#     mdl_gp.load_state_dict(torch.load(os.path.join(fold_pt,fn_pt[0]),map_location=device))
+#     mdl_gp.training = False
+#     for param in mdl_gp.parameters():  # Turn off auto-grad
+#         param.requires_grad = False
+#     # Get the constraint for each hyperparameter
+#     di_constraint = {}
+#     for attr in mdl_attr:
+#         terms = attr.split('.')
+#         tmp_attr = copy.deepcopy(mdl_gp)
+#         for j, term in enumerate(terms):
+#             if j+1 < len(terms):
+#                 tmp_attr = getattr(tmp_attr,term)
+#             else:
+#                 tmp_constraint = getattr(tmp_attr,term+'_constraint')
+#                 tmp_attr = getattr(tmp_attr,term)            
+#         di_constraint[attr] = tmp_constraint
+#         # Assign the transformed values
+#         idx_attr = np.where(dat_kernel.kernel == attr)[0]
+#         raw_tens = torch.tensor(dat_kernel.loc[idx_attr,'raw'].values,dtype=torch.float32)
+#         dat_kernel.loc[idx_attr,'value'] = di_constraint[attr].transform(raw_tens).numpy()
+#     # Format the types
+#     di_cn = u_attr.str.split('\\_',2,True).iloc[:,2].str.split('\\.',1,True).iloc[:,0].fillna('constant')
+#     di_cn = dict(zip(u_attr,di_cn))
+#     di_kern = u_attr.str.split('\\_',2,True).iloc[:,1].fillna('constant').replace('covar.raw','noise')
+#     di_kern = dict(zip(u_attr,di_kern))
+#     di_coef = u_attr.str.split('\\.',2,True).apply(lambda x: x[x.notnull().sum()-1],1).str.replace('raw_','')
+#     di_coef = dict(zip(u_attr,di_coef))
+#     di_lvl = u_attr.str.split('\\_',1,True).iloc[:,0]
+#     di_lvl = dict(zip(u_attr,di_lvl))
+#     # Apply to data.frame
+#     dat_kernel['cn'] = dat_kernel.kernel.map(di_cn)
+#     dat_kernel['kern'] = dat_kernel.kernel.map(di_kern)
+#     dat_kernel['coef'] = dat_kernel.kernel.map(di_coef)
+#     dat_kernel['lvl'] = dat_kernel.kernel.map(di_lvl)
+#     # Check that these four levels covers all permuatiosn
+#     assert dat_kernel.groupby(['cn','kern','coef','lvl']).size().unique().shape[0] == 1
+#     print('Saving dat_kernel for later')
+#     dat_kernel.to_csv(path_kernel,index=False)
+# # Ensure its datetime
+# dat_kernel.dates = pd.to_datetime(dat_kernel.dates)
 
 #####################################
 # --- (2) R-SQUARED PERFORMANCE --- #
@@ -243,12 +245,13 @@ esc_lbls = ['≤30', '31-37', '38-47', '≥48']
 esc_lvls = [0,1,2,3]
 
 # Calculate the change in escalation levels
-dat_pr = dat_recent.merge(act_y,'left','dates')
-dat_pr['month'] = dat_pr.dates.dt.strftime('%m').astype(int)
-dat_pr['year'] = dat_pr.dates.dt.strftime('%Y').astype(int)
-cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'dates', 'y', 'y_rt', 'pred', 'se'
+# Need to add the real time y (current y is the predicted y)
+dat_pr = dat_recent.merge(act_y.rename(columns={'y':'y_rt','dates':'date_rt'}),'left').drop(columns='date_pred')
+# dat_pr.query('date_pred == "2020-05-07 19:00:00"').drop(columns='se')
+dat_pr['month'] = dat_pr.date_rt.dt.strftime('%m').astype(int)
+dat_pr['year'] = dat_pr.date_rt.dt.strftime('%Y').astype(int)
+cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'date_rt', 'y', 'y_rt', 'pred', 'se'
 dat_ord = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=0.5)
-
 # Escalation changes by sign (-1/0/+1)
 cn_drop = ['year','month']
 tmp = dat_ord.assign(pred=lambda x: np.sign(x.pred),y=lambda x: np.sign(x.y))
@@ -280,7 +283,8 @@ gg_save('gg_tp_full.png',dir_figures,gg_tp_full,14,7)
 
 # - (ii) Precision/Recall with CI - #
 cn_n, cn_val = 'den', 'value'
-tmp1 = add_bin_CI(res_sp_agg.query('pred==0'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
+tmp1 = add_bin_CI(res_sp_agg.query('pred==1'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
+tmp1.pred = 0
 tmp2 = add_bin_CI(res_sp_full.query('pred > 0'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
 tmp = pd.concat([tmp1, tmp2]).reset_index(None,True)
 
@@ -303,8 +307,8 @@ gg_sp_agg = (ggplot(tmp1, aes(x='lead', y='value', color='metric')) +
     geom_point(size=2, position=posd) + 
     scale_color_discrete(labels=['Precision','Recall'],name='Metric') +
     scale_x_continuous(breaks=list(range(1,25))) +
-    scale_y_continuous(limits=[xmi,xmx]) + 
-    labs(x='Forecasting lead', y='Precision/Recall') +
+    scale_y_continuous(limits=[0,1]) +  #xmi,xmx
+    labs(x='Forecasting lead', y='Precision/Recall') + 
     geom_linerange(aes(ymin='lb', ymax='ub'),position=posd))
 gg_save('gg_sp_agg.png',dir_figures,gg_sp_agg,9,5)
 
@@ -321,7 +325,7 @@ gg_sp_month = (ggplot(tmp, aes(x='lead', y='value', color='metric')) +
 gg_save('gg_sp_month.png',dir_figures,gg_sp_month,16,height)
 
 # - (iii) Precision/recall curve - #
-p_seq = np.arange(0.5,0.91,0.01)
+p_seq = np.arange(0.02,1.0,0.02)
 cn_sign = ['pred','y']
 holder = []
 for p in p_seq:
@@ -336,6 +340,7 @@ for p in p_seq:
     holder.append(tmp)
 # Merge and plot
 df_pr = pd.concat(holder).pivot_table('value',['year','month','p','lead'],'metric').reset_index()
+df_pr.groupby('lead').head(1)
 
 tmp = df_pr.query('month==0 & year==0')
 gg_pr_agg = (ggplot(tmp, aes(x='sens',y='prec',color='lead',group='lead')) +
@@ -346,12 +351,11 @@ gg_pr_agg = (ggplot(tmp, aes(x='sens',y='prec',color='lead',group='lead')) +
     scale_x_continuous(limits=[0,1])+
     scale_y_continuous(limits=[0,1]) +
     ggtitle('Δ>0 in escalation (all test months)') +
-    theme(legend_direction='horizontal', legend_position=(0.3, 0.3),
+    theme(legend_direction='horizontal', legend_position=(0.7, 0.8),
             legend_background=element_blank(),legend_key_size=10))
 gg_save('gg_pr_agg.png',dir_figures,gg_pr_agg,5,4)
 
 tmp = df_pr.query('month>0 & year>0').assign(ymon=lambda x: (x.year+x.month/10).astype(str))
-
 gg_pr_month = (ggplot(tmp, aes(x='sens',y='prec',color='ymon',group='ymon')) +
     theme_bw() + geom_line() + 
     labs(x='Recall',y='Precision') +

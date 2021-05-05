@@ -2,6 +2,7 @@
 
 import torch
 import gpytorch
+import random
 import os
 import pickle
 import numpy as np
@@ -17,7 +18,7 @@ from gpytorch.kernels import AdditiveKernel, ProductKernel
 from gpytorch.distributions import MultitaskMultivariateNormal
 from gpytorch.likelihoods import MultitaskGaussianLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
-
+from gpytorch.settings import max_cg_iterations, fast_pred_var
 
 
 # Single slope: linear0
@@ -61,7 +62,9 @@ class mgp_real(ExactGP):
 
 
 class mdl():
-    def __init__(self, model, cn, device, groups=None):
+    def __init__(self, model, cn, device, groups=None, max_cg=10000, seed=1234):
+        self.max_cg = max_cg
+        self.seed = seed
         self.encX, self.encY = normalizer(), normalizer()
         self.isfit, self.istrained = False, False
         self.model, self.cn, self.device = model, pd.Series(cn), device
@@ -97,7 +100,7 @@ class mdl():
         self.cidx = pd.concat([pd.DataFrame({'tt':k,'cn':self.cn[v],'idx':v}) for k,v in self.di_cn.items()])
         self.cidx = self.cidx.reset_index(None,True).rename_axis('pidx').reset_index()
 
-    # self=mgp; X, Y = Xmat_tval.copy(), Ymat_tval.copy()
+    # X, Y = Xmat_train.copy(), Ymat_train.copy()
     def fit(self, X, Y):
         ntot = len(X)
         assert ntot == len(Y)
@@ -105,61 +108,62 @@ class mdl():
         Xtil, Ytil = X[:,self.cidx.idx].copy(), Y.copy()
         self.encX.fit(Xtil)
         self.encY.fit(Ytil)  # Learn scaling
-        Xtil = torch.tensor(self.encX.transform(Xtil)).to(self.device)
-        Ytil = torch.tensor(self.encY.transform(Ytil)).to(self.device)
+        Xtil = torch.tensor(self.encX.transform(Xtil),dtype=torch.float32).to(self.device)
+        Ytil = torch.tensor(self.encY.transform(Ytil),dtype=torch.float32).to(self.device)
         # Train model
-        torch.manual_seed(1234)  # Seed because gpytorch is non-determinsit in matrix inversion
+        torch.manual_seed(self.seed)  # Will ensure randomized kernel weights are identical each time
         self.likelihood = MultitaskGaussianLikelihood(num_tasks=self.k)
         self.gp = mgp_real(train_x=Xtil, train_y=Ytil, likelihood=self.likelihood, cidx=self.cidx)
         self.gp.to(self.device)
+        self.gp.float()
+        print(np.round(t2n(self.gp.kern_cosine_trend.state_dict()['task_covar_module.raw_var'][0:5]),4))
         self.isfit = True
+        # Initial fit should have all zeros
+        with torch.no_grad(), gpytorch.settings.max_cg_iterations(self.max_cg):
+            pred = self.gp(Xtil)
+            assert np.all(t2n(pred.mean)==0)
 
     def set_Xy(self, X, y):
-        Xtil = torch.tensor(self.encX.transform(X)).to(self.device)
-        ytil = torch.tensor(self.encY.transform(y)).to(self.device)
+        Xtil = torch.tensor(self.encX.transform(X),dtype=torch.float32).to(self.device)
+        ytil = torch.tensor(self.encY.transform(y),dtype=torch.float32).to(self.device)
         self.gp.set_train_data(inputs=Xtil, targets=ytil, strict=False)
 
-    # lr=0.01; max_iter=250
-    def tune(self, max_iter=250, lr=0.01, get_train=False):
+    # self=mgp; X=Xmat_tval.copy(); Y=Ymat_tval.copy()
+    # lr=0.01; max_iter=10; n_check=5; get_train=True
+    def tune(self, X, Y, max_iter=250, lr=0.01, n_check=25, get_train=False):
+        torch.manual_seed(self.seed)
+        random.seed(self.seed)
+        # Set up model for optimization
         optimizer = torch.optim.Adam(params=self.gp.parameters(), lr=lr)
-        mll = ExactMarginalLogLikelihood(self.likelihood, self.gp)
-        self.gp.train()
-        self.likelihood.train()  # Set model to training mode
-        self.gp.float()
-        ldiff, lprev, tol = 1, 100, 0.05
-        i, mi = 0, 100000
+        mll = ExactMarginalLogLikelihood(self.likelihood, self.gp)        
+        self.istrained = True
+        i = 0
         while (i < max_iter):
             i += 1
+            # Turn back on training
+            self.gp.train()
+            self.likelihood.train()
             optimizer.zero_grad()  # Zero gradients from previous iteration
-            with gpytorch.settings.max_cg_iterations(10000):
+            with gpytorch.settings.max_cg_iterations(self.max_cg):
                 output = self.gp(self.gp.train_inputs[0])  # Output from model
             loss = -mll(output, self.gp.train_targets)  # Calc loss and backprop gradients
             loss.backward()
             ll = loss.item()
-            mi = min(mi, ll)
-            lprev = loss.item()  # Reset
+            print('Loss: %0.3f (%i of %i)' % (ll,i,max_iter))
+            #print(np.round(t2n(self.gp.kern_cosine_trend.state_dict()['task_covar_module.raw_var'][0:5]),4))
             optimizer.step()
             torch.cuda.empty_cache()
-            if i % 5 == 0:
-                print('Iter %d/%d - Loss: %.3f, min: %.4f' % (i, max_iter, ll, mi))
-            if ll / mi - 1 > tol:
-                print('Stopping model, loss is %i%% above min' % (tol*100))
+            if i % n_check == 0:
+                print('Making a prediction over posterior (%i)' % i)
+                df_check = self.predict(X)
+                df_check = df_check.merge(pd.DataFrame(Y).rename_axis('idx').reset_index().melt('idx',None,'lead','y'))
+                df_check = df_check.assign(tt=lambda x: np.where(x.idx < self.gp.train_inputs[0].shape[0],'train','val' ))
+                df_r2 = df_check.groupby(['lead','tt']).apply(lambda x: r2_score(x.y, x.mu))
+                df_r2 = df_r2.reset_index().pivot('lead','tt',0).reset_index()
+                print(np.round(df_r2,3))
+            if i >= max_iter:
+                print('Reacher maximum iteration')
                 break
-        # Get internal fit
-        self.gp.eval()
-        self.likelihood.eval()
-        self.istrained = True
-
-        if get_train:
-            with torch.no_grad():
-                pred = self.gp(self.gp.train_inputs[0])
-            crit, cn = norm.ppf(0.975), ['mu','y','lb','ub']
-            tmp1 = pd.DataFrame(self.encY.inverse_transform(t2n(pred.mean))).rename_axis('idx').reset_index().melt('idx',None,'lead','mu')
-            tmp2 = pd.DataFrame(self.encY.inverse_transform(t2n(pred.stddev))).rename_axis('idx').reset_index().melt('idx',None,'lead','se')
-            tmp3 = pd.DataFrame(self.encY.inverse_transform(t2n(self.gp.train_targets))).rename_axis('idx').reset_index().melt('idx',None,'lead','y')
-            self.res_train = tmp1.merge(tmp2,'left',['idx','lead']).merge(tmp3,'left',['idx','lead'])
-            self.res_train = self.res_train.assign(lb=lambda x: x.mu - crit * x.se, ub=lambda x: x.mu + crit * x.se)
-            print(self.res_train.groupby('lead').apply(lambda x: pd.Series({'r2': r2_score(x.y, x.mu)})))
 
     # X, Y = Xmat_test.copy(), Ymat_test.copy()
     def predict(self, X, Y=None):
@@ -169,17 +173,21 @@ class mdl():
             Ytil = torch.tensor(self.encY.transform(Y),dtype=torch.float32).to(self.device)
         ntest = Xtil.shape[0]
         cn = ['mu', 'se']
+        # Turn off training
         self.gp.eval()
         self.likelihood.eval()
         Mu, Sigma = np.zeros([ntest, self.k]), np.zeros([ntest, self.k])
+        torch.manual_seed(self.seed)
+        random.seed(self.seed)
         for i in range(ntest):
             xslice = Xtil[[i]]
-            with torch.no_grad(), gpytorch.settings.max_cg_iterations(10000):
-                pred = self.gp(xslice)
+            with torch.no_grad(), max_cg_iterations(self.max_cg), fast_pred_var():
+                pred = self.gp.eval()(xslice)
             Mu[i] = t2n(pred.mean).flat
             Sigma[i] = t2n(pred.stddev).flat
             # Append on test set
             if Y is not None:
+                print('Appeding X/Y data')
                 self.gp.set_train_data(inputs=torch.cat([self.gp.train_inputs[0],xslice]),
                                        targets=torch.cat([self.gp.train_targets, Ytil[[i]]]),strict=False)
         # Transform back to original scale (not we only need se to be multipled by sig from (X-mu)/sig
@@ -191,8 +199,10 @@ class mdl():
         # Tidy up and return
         tmp1 = pd.DataFrame(Mu).rename_axis('idx').reset_index().melt('idx',None,'lead','mu')
         tmp2 = pd.DataFrame(Sigma).rename_axis('idx').reset_index().melt('idx',None,'lead','se')
-        tmp3 = pd.DataFrame(Y).rename_axis('idx').reset_index().melt('idx',None,'lead','y')
-        df_test = tmp1.merge(tmp2,'left',['idx','lead']).merge(tmp3,'left',['idx','lead'])
+        df_test = tmp1.merge(tmp2,'left',['idx','lead'])
+        if Y is not None:
+            tmp3 = pd.DataFrame(Y).rename_axis('idx').reset_index().melt('idx',None,'lead','y')
+            df_test = df_test.merge(tmp3,'left',['idx','lead'])
         return df_test
 
     def save(self, folder):
@@ -208,3 +218,15 @@ class mdl():
         """
         SET EXISTING CLASS ATTRIBUTES TO MATCH
         """
+
+
+# if get_train:
+        #     with torch.no_grad():
+        #         pred = self.gp(self.gp.train_inputs[0])
+        #     crit, cn = norm.ppf(0.975), ['mu','y','lb','ub']
+        #     tmp1 = pd.DataFrame(self.encY.inverse_transform(t2n(pred.mean))).rename_axis('idx').reset_index().melt('idx',None,'lead','mu')
+        #     tmp2 = pd.DataFrame(self.encY.inverse_transform(t2n(pred.stddev))).rename_axis('idx').reset_index().melt('idx',None,'lead','se')
+        #     tmp3 = pd.DataFrame(self.encY.inverse_transform(t2n(self.gp.train_targets))).rename_axis('idx').reset_index().melt('idx',None,'lead','y')
+        #     self.res_train = tmp1.merge(tmp2,'left',['idx','lead']).merge(tmp3,'left',['idx','lead'])
+        #     self.res_train = self.res_train.assign(lb=lambda x: x.mu - crit * x.se, ub=lambda x: x.mu + crit * x.se)
+        #     print(self.res_train.groupby('lead').apply(lambda x: pd.Series({'r2': r2_score(x.y, x.mu)})))
