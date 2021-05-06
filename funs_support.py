@@ -39,7 +39,6 @@ def get_date_range(x):
         return x
     else:
         return None
-    
 
 def stopifnot(stmt,msg):
     if not stmt:
@@ -174,15 +173,19 @@ def makeifnot(path):
 
 def date2ymd(x):
     assert isinstance(x, pd.Series)
-    dat = pd.DataFrame({'year':x.dt.strftime('%Y').astype(int),
-                          'month':x.dt.strftime('%m').astype(int),
-                          'day':x.dt.strftime('%d').astype(int)})
+    dat = pd.DataFrame({'year':x.dt.year, 'month':x.dt.month,
+                        'day':x.dt.strftime('%d').astype(int)})
     return dat
 
 def date2ymdh(x):
     assert isinstance(x, pd.Series)
     year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
     return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
+
+def date2ymw(x):
+    assert isinstance(x, pd.Series)
+    dat = pd.DataFrame({'year': x.dt.year, 'month':x.dt.month,'woy':x.dt.weekofyear})
+    return dat
 
 def ymd2date(x):
     assert isinstance(x, pd.DataFrame)

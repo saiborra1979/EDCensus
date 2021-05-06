@@ -4,6 +4,19 @@ import pandas as pd
 from scipy import stats
 from funs_support import stopifnot
 from statsmodels.stats.proportion import proportion_confint as propCI
+import statsmodels.api as sm
+
+def ols(y, x, alpha=0.05):
+    assert isinstance(x,np.ndarray) and isinstance(y,np.ndarray)
+    mod = sm.OLS(y, x).fit()
+    p = 1
+    if len(x.shape) == 2:
+        p = x.shape[1]
+    cn = 'x'+pd.Series(range(p)).astype(str)
+    df1 = pd.DataFrame({'cn':cn,'bhat':mod.params})
+    df2 = pd.DataFrame(mod.conf_int(alpha),columns=['lb','ub'])
+    df = pd.concat([df1, df2],1)
+    return df
 
 def get_CI(df,cn_mu,cn_se,alpha=0.05):
     critv = stats.norm.ppf(1-alpha/2)

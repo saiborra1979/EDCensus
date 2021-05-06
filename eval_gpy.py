@@ -8,8 +8,8 @@ import numpy as np
 from scipy.stats import spearmanr
 from plotnine import *
 from sklearn.metrics import r2_score
-from funs_support import ymdh2date, ymd2date, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
-from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls
+from funs_support import ymdh2date, ymd2date, date2ymw, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
+from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls, ols
 from mdls.gpy import gp_real
 import torch
 import gpytorch
@@ -53,7 +53,6 @@ act_y = act_y.loc[:,idx['y','lead_0']].reset_index().droplevel(1,1)
 act_y.rename(columns={'y':'y_rt'},inplace=True)
 act_y = act_y.assign(date_rt=ymdh2date(act_y)).drop(columns=cn_ymdh)[['date_rt','y_rt']]
 
-
 # (ii) Find the most recent folder with GPY results
 fn_test = pd.Series(os.listdir(dir_test))
 fn_test = fn_test[fn_test.str.contains('^[0-9]{4}\\_[0-9]{2}\\_[0-9]{2}$')].reset_index(None,True)
@@ -87,13 +86,21 @@ assert len(dat_recent.dtrain.unique()) == 1
 dat_recent.drop(columns = ['model','groups','dtrain'], inplace=True)
 dat_recent = dat_recent.sort_values(['lead','date_rt']).reset_index(None,True)
 # Add on the date columns
-dat_recent = dat_recent.assign(doy=lambda x: x.date_rt.dt.strftime('%Y-%m-%d'),
-    woy=lambda x: x.date_rt.dt.weekofyear,
-    year=lambda x: x.date_rt.dt.year, month=lambda x: x.date_rt.dt.month)
+dat_recent = dat_recent.assign(doy=lambda x: x.date_rt.dt.strftime('%Y-%m-%d'))
+dat_recent = pd.concat([dat_recent, date2ymw(dat_recent.date_rt)],1)
 dat_recent = dat_recent.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
-
 # Merge real-time y's
 dat_recent = dat_recent.merge(act_y,'left')
+
+# Keep only full week of years
+freq_woy = dat_recent.groupby(['woy','year']).size().reset_index().rename(columns={0:'n'})
+freq_woy = freq_woy.query('n == n.max()').drop(columns='n')
+# Mappings of year/woy to date
+lookup_woy = dat_recent.groupby(['year','woy']).date_rt.min().reset_index()
+lookup_woy = lookup_woy.merge(freq_woy,'inner')
+
+# Subset to only full weeks
+dat_recent = dat_recent.merge(freq_woy,'inner')
 
 # Get the y-ranges
 ymi, ymx = dat_recent.pred.min()-1, dat_recent.pred.max()+1
@@ -103,44 +110,50 @@ esc_lbls = ['≤30', '31-37', '38-47', '≥48']
 esc_lvls = [0,1,2,3]
 
 # Calculate the different escalation levels
-
-cn_esc = ['date_rt','y_rt','y'] #,'date_pred'
+cn_esc = ['lead','date_rt','y_rt','y'] #,'date_pred'
 act_esc = dat_recent[cn_esc].copy()
 tmp = act_esc[['y_rt','y']].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
 act_esc = pd.concat([act_esc,tmp.rename(columns={'y':'esc','y_rt':'esc_rt'})],1)
 act_esc = act_esc.assign(esc = lambda x: x.esc - x.esc_rt)
-act_esc = act_esc.assign(woy=lambda x: x.date_rt.dt.weekofyear,
-    year=lambda x: x.date_rt.dt.year,month=lambda x: x.date_rt.dt.month)
+act_esc = pd.concat([act_esc,date2ymw(act_esc.date_rt)],1)
 act_esc = act_esc.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
+
+# Calculate the change in escalation levels
+cn_pr = ['date_rt','year','month','lead','y','y_rt','pred','se']
+dat_pr = dat_recent[cn_pr].copy()
+cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'date_rt', 'y', 'y_rt', 'pred', 'se'
+dat_ord = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=0.5)
+# Double check it lines up with hand calculation
+q1 = act_esc.query('lead==10').groupby(['year','month','esc']).size().reset_index()
+q2 = dat_ord.query('lead==10').groupby(['year','month','y']).size().reset_index()
+q3 = q1.rename(columns={0:'n1','esc':'y'}).merge(q2.rename(columns={0:'n2'}))
+assert q3.query('n1 != n2').shape[0] == 0
 
 ######################################
 # --- (2) FACTORS OF PERFORMANCE --- #
 
 # (i) Spearman performance
-perf_rho = dat_recent.groupby(['lead','year','doy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
-perf_rho = perf_rho.reset_index().rename(columns={0:'rho'}).assign(doy=lambda x: pd.to_datetime(x.doy))
-perf_rho = perf_rho.assign(woy=lambda x: x.doy.dt.weekofyear,month=lambda x: x.doy.dt.month)
-perf_rho = perf_rho.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
+perf_rho = dat_recent.groupby(['lead','year','woy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
+perf_rho = perf_rho.reset_index().rename(columns={0:'rho'}).merge(lookup_woy)
 
+# # Time trend
+# perf_rho.assign(tidx=lambda x: x.groupby('lead').cumcount()+1).groupby('lead').apply(lambda x: ols(y=x.rho.values,x=x.tidx.values)).reset_index()
+
+# (ii) "baseline" easy of prediction: r-squared from using previous day's hour
+dmin, dmax = dat_recent.date_rt.min(), dat_recent.date_rt.max()
+yshift = act_y.query('date_rt>=@dmin & date_rt<=@dmax').assign(y_lead=lambda x: x.y_rt.shift(24)).dropna()
+yshift.y_lead = yshift.y_lead.astype(int)
+yshift = pd.concat([yshift,date2ymw(yshift.date_rt)],1).reset_index(None,True)
+yshift = yshift.assign(hour=lambda x: x.date_rt.dt.hour)
+bl_rho = yshift.groupby(['year','woy']).apply(lambda x: r2_score(x.y_rt,x.y_lead)).reset_index()
+bl_rho = bl_rho.rename(columns={0:'r2'}).merge(lookup_woy)
 
 # (ii) (a) Average level changes, (b) number of escalations, (c) number of esc jumps > 1
-act_esc
+
 
 ################################
 # --- (3) PRECISION/RECALL --- #
 
-posd = position_dodge(0.5)
-
-
-
-# Calculate the change in escalation levels
-# Need to add the real time y (current y is the predicted y)
-dat_pr = dat_recent.merge(act_y.rename(columns={'y':'y_rt','dates':'date_rt'}),'left').drop(columns='date_pred')
-# dat_pr.query('date_pred == "2020-05-07 19:00:00"').drop(columns='se')
-dat_pr['month'] = dat_pr.date_rt.dt.strftime('%m').astype(int)
-dat_pr['year'] = dat_pr.date_rt.dt.strftime('%Y').astype(int)
-cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'date_rt', 'y', 'y_rt', 'pred', 'se'
-dat_ord = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=0.5)
 # Escalation changes by sign (-1/0/+1)
 cn_drop = ['year','month']
 tmp = dat_ord.assign(pred=lambda x: np.sign(x.pred),y=lambda x: np.sign(x.y))
@@ -158,60 +171,8 @@ tmp2 = tmp0.query('metric=="sens"').assign(fn=lambda x: x.den-np.round(x.value*x
 res_tp_full = tmp1.merge(tmp2)
 assert res_tp_full.assign(check=lambda x: x.tp+x.fn == x.pos).check.all()
 res_tp_full = res_tp_full.melt(['lead','pred'],None,'metric','n')
+del tmp0, tmp1, tmp2
 
-tit = 'Prediction breakdown for Δ>0 in escalation'
-tmp = res_tp_full.assign(pred=lambda x: pd.Categorical(x.pred.map(di_lblz),list(di_lblz.values())), metric=lambda x: pd.Categorical(x.metric.map(di_metric), list(di_metric.values())))
-gg_tp_full = (ggplot(tmp, aes(x='lead', y='n', color='metric')) +
-             theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
-             scale_x_continuous(breaks=list(range(1,25))) +
-             labs(x='Forecasting lead', y='Count') +
-             facet_wrap('~pred',scales='free_y',labeller=label_both) +
-              scale_color_manual(values=colz_gg, name='Metric') +
-              theme(subplots_adjust={'wspace': 0.10}))
-gg_save('gg_tp_full.png',dir_figures,gg_tp_full,14,7)
-
-# - (ii) Precision/Recall with CI - #
-cn_n, cn_val = 'den', 'value'
-tmp1 = add_bin_CI(res_sp_agg.query('pred==1'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
-tmp1.pred = 0
-tmp2 = add_bin_CI(res_sp_full.query('pred > 0'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
-tmp = pd.concat([tmp1, tmp2]).reset_index(None,True)
-
-tit = 'Precision/Recall for escalation levels\n95% CI (beta method)'
-gg_sp_full = (ggplot(tmp, aes(x='lead', y='value', color='pred.astype(str)')) +
-    theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
-    scale_x_continuous(breaks=list(range(1,25))) +
-    labs(x='Forecasting lead', y='Precision/Recall') +
-    geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
-    facet_wrap('~metric', labeller=labeller(metric=di_pr)) +
-    scale_color_manual(name='Δ esclation',values=colz_gg, labels=lblz) +
-    theme(legend_position=(0.5, -0.05),legend_direction='horizontal'))
-gg_save('gg_sp_full.png',dir_figures,gg_sp_full,13,5)
-
-xmi = (tmp1.lb.min()*100 // 5)*5/100
-xmx = np.ceil(tmp1.ub.max()*100 / 5)*5/100
-tit = 'Precision/Recall for Δ>0 in escalation\n95% CI (beta method)'
-gg_sp_agg = (ggplot(tmp1, aes(x='lead', y='value', color='metric')) +
-    theme_bw() + ggtitle(tit) +
-    geom_point(size=2, position=posd) + 
-    scale_color_discrete(labels=['Precision','Recall'],name='Metric') +
-    scale_x_continuous(breaks=list(range(1,25))) +
-    scale_y_continuous(limits=[0,1]) +  #xmi,xmx
-    labs(x='Forecasting lead', y='Precision/Recall') + 
-    geom_linerange(aes(ymin='lb', ymax='ub'),position=posd))
-gg_save('gg_sp_agg.png',dir_figures,gg_sp_agg,9,5)
-
-tmp = add_bin_CI(res_sp_month.query('pred==1'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
-tmp.reset_index(None,True).loc[0]
-height = int(np.ceil(len(tmp.month.unique()) / 2)) * 3
-gg_sp_month = (ggplot(tmp, aes(x='lead', y='value', color='metric')) +
-             theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
-             scale_color_discrete(labels=['Precision','Recall'],name='Metric') +
-             scale_x_continuous(breaks=list(range(1,25))) +
-             labs(x='Forecasting lead', y='Precision/Recall') +
-             geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
-             facet_wrap('~year+month',ncol=3,labeller=label_both))
-gg_save('gg_sp_month.png',dir_figures,gg_sp_month,16,height)
 
 # - (iii) Precision/recall curve - #
 p_seq = np.arange(0.02,1.0,0.02)
@@ -305,10 +266,85 @@ gg_save('gg_pr_n.png',dir_figures,gg_pr_n,18,10)
 #######################
 # --- (4) FIGURES --- #
 
+# (4.i) Spearman's correlation over time
+
+gg_rho_time = (ggplot(perf_rho,aes(x='date_rt',y='rho')) + 
+    theme_bw() + geom_line() + 
+    facet_wrap('~lead',labeller=label_both,nrow=4) + 
+    labs(y="Spearman's rho (weekly)") + 
+    geom_line(aes(y='r2'),data=bl_rho,color='red') + 
+    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
+gg_save('gg_rho_weekly.png',dir_figures,gg_rho_time,12,8)
+
+
+gg_bl_rho = (ggplot(bl_rho,aes(x='date_rt',y='rho')) + 
+    theme_bw() + geom_line() + 
+    facet_wrap('~lead',labeller=label_both,nrow=4) + 
+    labs(y="Spearman's rho (weekly)") + 
+    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
+gg_save('gg_rho_weekly.png',dir_figures,gg_rho_time,12,8)
 
 
 
 
+
+tit = 'Prediction breakdown for Δ>0 in escalation'
+tmp = res_tp_full.assign(pred=lambda x: pd.Categorical(x.pred.map(di_lblz),list(di_lblz.values())), metric=lambda x: pd.Categorical(x.metric.map(di_metric), list(di_metric.values())))
+gg_tp_full = (ggplot(tmp, aes(x='lead', y='n', color='metric')) +
+             theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
+             scale_x_continuous(breaks=list(range(1,25))) +
+             labs(x='Forecasting lead', y='Count') +
+             facet_wrap('~pred',scales='free_y',labeller=label_both) +
+              scale_color_manual(values=colz_gg, name='Metric') +
+              theme(subplots_adjust={'wspace': 0.10}))
+gg_save('gg_tp_full.png',dir_figures,gg_tp_full,14,7)
+
+
+
+# - (ii) Precision/Recall with CI - #
+cn_n, cn_val = 'den', 'value'
+tmp1 = add_bin_CI(res_sp_agg.query('pred==1'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
+tmp1.pred = 0
+tmp2 = add_bin_CI(res_sp_full.query('pred > 0'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
+tmp = pd.concat([tmp1, tmp2]).reset_index(None,True)
+
+tit = 'Precision/Recall for escalation levels\n95% CI (beta method)'
+gg_sp_full = (ggplot(tmp, aes(x='lead', y='value', color='pred.astype(str)')) +
+    theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
+    scale_x_continuous(breaks=list(range(1,25))) +
+    labs(x='Forecasting lead', y='Precision/Recall') +
+    geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
+    facet_wrap('~metric', labeller=labeller(metric=di_pr)) +
+    scale_color_manual(name='Δ esclation',values=colz_gg, labels=lblz) +
+    theme(legend_position=(0.5, -0.05),legend_direction='horizontal'))
+gg_save('gg_sp_full.png',dir_figures,gg_sp_full,13,5)
+
+xmi = (tmp1.lb.min()*100 // 5)*5/100
+xmx = np.ceil(tmp1.ub.max()*100 / 5)*5/100
+tit = 'Precision/Recall for Δ>0 in escalation\n95% CI (beta method)'
+gg_sp_agg = (ggplot(tmp1, aes(x='lead', y='value', color='metric')) +
+    theme_bw() + ggtitle(tit) +
+    geom_point(size=2, position=posd) + 
+    scale_color_discrete(labels=['Precision','Recall'],name='Metric') +
+    scale_x_continuous(breaks=list(range(1,25))) +
+    scale_y_continuous(limits=[0,1]) +  #xmi,xmx
+    labs(x='Forecasting lead', y='Precision/Recall') + 
+    geom_linerange(aes(ymin='lb', ymax='ub'),position=posd))
+gg_save('gg_sp_agg.png',dir_figures,gg_sp_agg,9,5)
+
+tmp = add_bin_CI(res_sp_month.query('pred==1'), cn_n=cn_n, cn_val=cn_val, method='beta', alpha=0.05)
+tmp.reset_index(None,True).loc[0]
+height = int(np.ceil(len(tmp.month.unique()) / 2)) * 3
+gg_sp_month = (ggplot(tmp, aes(x='lead', y='value', color='metric')) +
+             theme_bw() + geom_point(size=2, position=posd) + ggtitle(tit) +
+             scale_color_discrete(labels=['Precision','Recall'],name='Metric') +
+             scale_x_continuous(breaks=list(range(1,25))) +
+             labs(x='Forecasting lead', y='Precision/Recall') +
+             geom_linerange(aes(ymin='lb', ymax='ub'),position=posd) +
+             facet_wrap('~year+month',ncol=3,labeller=label_both))
+gg_save('gg_sp_month.png',dir_figures,gg_sp_month,16,height)
 
 
 
