@@ -88,7 +88,6 @@ dat_recent = dat_recent.sort_values(['lead','date_rt']).reset_index(None,True)
 # Add on the date columns
 dat_recent = dat_recent.assign(doy=lambda x: x.date_rt.dt.strftime('%Y-%m-%d'))
 dat_recent = pd.concat([dat_recent, date2ymw(dat_recent.date_rt)],1)
-dat_recent = dat_recent.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
 # Merge real-time y's
 dat_recent = dat_recent.merge(act_y,'left')
 
@@ -116,7 +115,6 @@ tmp = act_esc[['y_rt','y']].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, F
 act_esc = pd.concat([act_esc,tmp.rename(columns={'y':'esc','y_rt':'esc_rt'})],1)
 act_esc = act_esc.assign(esc = lambda x: x.esc - x.esc_rt)
 act_esc = pd.concat([act_esc,date2ymw(act_esc.date_rt)],1)
-act_esc = act_esc.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
 
 # Calculate the change in escalation levels
 cn_pr = ['date_rt','year','month','lead','y','y_rt','pred','se']
@@ -129,26 +127,55 @@ q2 = dat_ord.query('lead==10').groupby(['year','month','y']).size().reset_index(
 q3 = q1.rename(columns={0:'n1','esc':'y'}).merge(q2.rename(columns={0:'n2'}))
 assert q3.query('n1 != n2').shape[0] == 0
 
+# (iv) Get the "baseline" results: using the previous day's hour
+dat_bl = pd.read_csv(os.path.join(dir_test,'bl_hour.csv'))
+dat_bl[cn_dates] = dat_bl[cn_dates].apply(pd.to_datetime,0)
+dat_bl = pd.concat([dat_bl, date2ymw(dat_bl.date_rt)],1).merge(freq_woy,'inner')
+
 ######################################
 # --- (2) FACTORS OF PERFORMANCE --- #
 
-# (i) Spearman performance
-perf_rho = dat_recent.groupby(['lead','year','woy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
-perf_rho = perf_rho.reset_index().rename(columns={0:'rho'}).merge(lookup_woy)
+cn_rho = ['date_rt','lead','year','woy','y','pred']
+dat_gp_bl = pd.concat([dat_recent[cn_rho].assign(tt='GP'),dat_bl[cn_rho].assign(tt='Baseline')]).reset_index(None,True)
+# --- (i) Spearman's rho --- #
+# (a) by lead
+perf_lead = dat_gp_bl.groupby(['tt','lead','year','woy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
+perf_lead = perf_lead.reset_index().rename(columns={0:'rho'}).merge(lookup_woy)
+# (b) by day
+perf_day = dat_gp_bl.groupby(['tt','date_rt','year','woy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
+perf_day = perf_day.reset_index().rename(columns={0:'rho'})
+perf_day = perf_day.merge(freq_woy,'inner',['year','woy'])
+perf_day_woy = perf_day.groupby(['tt','year','woy']).rho.mean().reset_index().merge(lookup_woy)
+
 
 # # Time trend
 # perf_rho.assign(tidx=lambda x: x.groupby('lead').cumcount()+1).groupby('lead').apply(lambda x: ols(y=x.rho.values,x=x.tidx.values)).reset_index()
 
-# (ii) "baseline" easy of prediction: r-squared from using previous day's hour
-dmin, dmax = dat_recent.date_rt.min(), dat_recent.date_rt.max()
-yshift = act_y.query('date_rt>=@dmin & date_rt<=@dmax').assign(y_lead=lambda x: x.y_rt.shift(24)).dropna()
-yshift.y_lead = yshift.y_lead.astype(int)
-yshift = pd.concat([yshift,date2ymw(yshift.date_rt)],1).reset_index(None,True)
-yshift = yshift.assign(hour=lambda x: x.date_rt.dt.hour)
-bl_rho = yshift.groupby(['year','woy']).apply(lambda x: r2_score(x.y_rt,x.y_lead)).reset_index()
-bl_rho = bl_rho.rename(columns={0:'r2'}).merge(lookup_woy)
 
 # (ii) (a) Average level changes, (b) number of escalations, (c) number of esc jumps > 1
+
+
+#######################
+# --- (4) FIGURES --- #
+
+# (4.i) Spearman's correlation over time
+gg_rho_weekly = (ggplot(perf_lead,aes(x='date_rt',y='rho',color='tt')) + 
+    theme_bw() + geom_line() + 
+    scale_color_manual(name='Model',labels=['Baseline','GP'],values=['black','red']) + 
+    facet_wrap('~lead',labeller=label_both,nrow=4) + 
+    labs(y="Spearman's rho (weekly)") + 
+    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
+gg_save('gg_rho_weekly.png',dir_figures,gg_rho_weekly,12,8)
+
+gg_rho_daily = (ggplot(perf_day_woy,aes(x='date_rt',y='rho',color='tt')) + 
+    theme_bw() + geom_line() + 
+    scale_color_manual(name='Model',labels=['Baseline','GP'],values=['black','red']) + 
+    labs(y="Spearman's rho") + 
+    ggtitle('Weekly average over 24-hour correlation') + 
+    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
+gg_save('gg_rho_daily.png',dir_figures,gg_rho_daily,5,3.5)
 
 
 ################################
@@ -266,25 +293,6 @@ gg_save('gg_pr_n.png',dir_figures,gg_pr_n,18,10)
 #######################
 # --- (4) FIGURES --- #
 
-# (4.i) Spearman's correlation over time
-
-gg_rho_time = (ggplot(perf_rho,aes(x='date_rt',y='rho')) + 
-    theme_bw() + geom_line() + 
-    facet_wrap('~lead',labeller=label_both,nrow=4) + 
-    labs(y="Spearman's rho (weekly)") + 
-    geom_line(aes(y='r2'),data=bl_rho,color='red') + 
-    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
-gg_save('gg_rho_weekly.png',dir_figures,gg_rho_time,12,8)
-
-
-gg_bl_rho = (ggplot(bl_rho,aes(x='date_rt',y='rho')) + 
-    theme_bw() + geom_line() + 
-    facet_wrap('~lead',labeller=label_both,nrow=4) + 
-    labs(y="Spearman's rho (weekly)") + 
-    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
-gg_save('gg_rho_weekly.png',dir_figures,gg_rho_time,12,8)
 
 
 

@@ -182,9 +182,11 @@ def date2ymdh(x):
     year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
     return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
 
-def date2ymw(x):
+def date2ymw(x,week53=True):
     assert isinstance(x, pd.Series)
     dat = pd.DataFrame({'year': x.dt.year, 'month':x.dt.month,'woy':x.dt.weekofyear})
+    if week53:  # Will ensure week 53 is not split over two years
+        dat = dat.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
     return dat
 
 def ymd2date(x):
