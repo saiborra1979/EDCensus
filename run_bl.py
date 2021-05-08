@@ -50,7 +50,7 @@ print('# --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #')
 
 dtrain = 1
 h_retrain = 1
-assert isinstance(dtrain,int) & isinstance(rtrain,int)
+assert isinstance(dtrain,int) & isinstance(h_retrain,int)
 
 
 dfmt = '%Y-%m-%d'
@@ -68,6 +68,7 @@ offset_train = pd.DateOffset(days=dtrain)
 
 cn_ohe = ['date_hour']
 cn_num = None#['census_max']
+cn_cont = ['date_trend']
 
 holder = []
 for ii in range(nhours):  #nhours
