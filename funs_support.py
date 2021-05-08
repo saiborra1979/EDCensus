@@ -36,6 +36,9 @@ def find_dir_olu():
     elif cpu == 'snowqueen':
         print('On snowqueen machine')
         dir_olu = os.path.join(dir_base, '..')
+    elif cpu == 'TDS71016-EXCU-T':
+        print('On Padmanies machine')
+        dir_olu = os.path.join(dir_base, '..')
     elif hpf1 or hpf2:
         print('On HPF')
         dir_olu = os.path.join(dir_base, '..')
