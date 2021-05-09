@@ -5,7 +5,7 @@ from gpytorch.models import ExactGP
 from gpytorch.means import MultitaskMean, ConstantMean
 from gpytorch.kernels import RBFKernel, IndexKernel
 from gpytorch.distributions import MultivariateNormal
-from gpytorch.likelihoods import GaussianLikelihood
+from gpytorch.likelihoods import GaussianLikelihood, 
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.settings import max_cg_iterations, fast_pred_var
 
@@ -42,7 +42,7 @@ class mdl():
         self.dtype = torch.float32
         self.leads = np.arange(1,leads+1)
         self.max_cg = max_cg
-        self.isfit, self.istrained = False, False
+        self.isfit = False
 
     # self, X, y = gp_model, Xtrain.copy(), ytrain.copy()
     # n_steps=250; lr=0.01; tol=0.0001

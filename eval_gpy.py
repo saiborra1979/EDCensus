@@ -5,34 +5,24 @@ import copy
 import math
 import pandas as pd
 import numpy as np
-from scipy.stats import spearmanr
 from plotnine import *
+from scipy.stats import spearmanr
 from sklearn.metrics import r2_score
 from funs_support import ymdh2date, ymd2date, date2ymw, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
 from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls, ols
-from mdls.gpy import gp_real
-import torch
-import gpytorch
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
 dir_figures = os.path.join(dir_olu, 'figures', 'census')
-dir_kernel = os.path.join(dir_figures, 'kernel')
 dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 lst_dir = [dir_figures, dir_output, dir_flow, dir_test]
 assert all([os.path.exists(z) for z in lst_dir])
-makeifnot(dir_kernel)
 
 cn_ymd = ['year', 'month', 'day']
 cn_ymdh = cn_ymd + ['hour']
 cn_ymdl = cn_ymd + ['lead']
-
-use_cuda = torch.cuda.is_available()
-sdev = "cuda" if use_cuda else "cpu"
-print('Using device: %s' % sdev)
-device = torch.device(sdev)
 
 di_desc = {'25%': 'lb', '50%': 'med', '75%': 'ub'}
 di_pr = {'prec': 'Precision', 'sens': 'Recall'}
@@ -45,6 +35,8 @@ lblz = ['≥0', '1', '2', '3']
 #########################
 # --- (1) LOAD DATA --- #
 
+fn_test = pd.Series(os.listdir(dir_test))
+
 # (i) Load the real-time y
 cn_ymdh = ['year', 'month', 'day', 'hour']
 idx = pd.IndexSlice
@@ -53,43 +45,15 @@ act_y = act_y.loc[:,idx['y','lead_0']].reset_index().droplevel(1,1)
 act_y.rename(columns={'y':'y_rt'},inplace=True)
 act_y = act_y.assign(date_rt=ymdh2date(act_y)).drop(columns=cn_ymdh)[['date_rt','y_rt']]
 
-# (ii) Find the most recent folder with GPY results
-fn_test = pd.Series(os.listdir(dir_test))
-fn_test = fn_test[fn_test.str.contains('^[0-9]{4}\\_[0-9]{2}\\_[0-9]{2}$')].reset_index(None,True)
-dates_test = pd.to_datetime(fn_test,format='%Y_%m_%d')
-df_fn_test = pd.DataFrame({'fn':fn_test,'dates':dates_test,'has_gpy':False})
-# Find out which have GP data
-for fn in fn_test:
-    fn_fold = pd.Series(os.listdir(os.path.join(dir_test,fn)))
-    mdls_fold = list(pd.Series(fn_fold.str.split('\\_',2,True).iloc[:,1].unique()).dropna())
-    if 'gpy' in mdls_fold:
-        df_fn_test.loc[df_fn_test.fn==fn,'has_gpy'] = True
-# Get largest date
-assert df_fn_test.has_gpy.any()
-fold_recent = df_fn_test.loc[df_fn_test.dates.idxmax()].fn
-print('Most recent folder: %s' % fold_recent)
-path_recent = os.path.join(dir_test,fold_recent)
-fn_recent = pd.Series(os.listdir(path_recent))
-
-# (iii) Load the predicted/actual
+# (ii) Load model benchmark
 cn_dates = ['date_rt','date_pred']
-fn_res = fn_recent[fn_recent.str.contains('^res\\_.*\\.csv$')]
-holder = []
-for fn in fn_res:
-    holder.append(pd.read_csv(os.path.join(path_recent,fn)))
-dat_recent = pd.concat(holder).reset_index(None,True)
+fn_mdl = fn_test[fn_test.str.contains('xgboost')].to_list()[0]
+dat_recent = pd.read_csv(os.path.join(dir_test,fn_mdl))
 dat_recent[cn_dates] = dat_recent[cn_dates].apply(pd.to_datetime)
-# dat_recent.insert(0,'dates',pd.to_datetime(dat_recent.date + ' ' + dat_recent.hour.astype(str)+':00:00'))
-assert np.all(dat_recent.model == 'gpy')
-assert len(dat_recent.groups.unique()) == 1
-assert len(dat_recent.dtrain.unique()) == 1
-dat_recent.drop(columns = ['model','groups','dtrain'], inplace=True)
 dat_recent = dat_recent.sort_values(['lead','date_rt']).reset_index(None,True)
 # Add on the date columns
 dat_recent = dat_recent.assign(doy=lambda x: x.date_rt.dt.strftime('%Y-%m-%d'))
 dat_recent = pd.concat([dat_recent, date2ymw(dat_recent.date_rt)],1)
-# Merge real-time y's
-dat_recent = dat_recent.merge(act_y,'left')
 
 # Keep only full week of years
 freq_woy = dat_recent.groupby(['woy','year']).size().reset_index().rename(columns={0:'n'})
@@ -116,16 +80,16 @@ act_esc = pd.concat([act_esc,tmp.rename(columns={'y':'esc','y_rt':'esc_rt'})],1)
 act_esc = act_esc.assign(esc = lambda x: x.esc - x.esc_rt)
 act_esc = pd.concat([act_esc,date2ymw(act_esc.date_rt)],1)
 
-# Calculate the change in escalation levels
-cn_pr = ['date_rt','year','month','lead','y','y_rt','pred','se']
-dat_pr = dat_recent[cn_pr].copy()
-cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'date_rt', 'y', 'y_rt', 'pred', 'se'
-dat_ord = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=0.5)
-# Double check it lines up with hand calculation
-q1 = act_esc.query('lead==10').groupby(['year','month','esc']).size().reset_index()
-q2 = dat_ord.query('lead==10').groupby(['year','month','y']).size().reset_index()
-q3 = q1.rename(columns={0:'n1','esc':'y'}).merge(q2.rename(columns={0:'n2'}))
-assert q3.query('n1 != n2').shape[0] == 0
+# # Calculate the change in escalation levels
+# cn_pr = ['date_rt','year','month','lead','y','y_rt','pred','se']
+# dat_pr = dat_recent[cn_pr].copy()
+# cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'date_rt', 'y', 'y_rt', 'pred', 'se'
+# dat_ord = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=0.5)
+# # Double check it lines up with hand calculation
+# q1 = act_esc.query('lead==10').groupby(['year','month','esc']).size().reset_index()
+# q2 = dat_ord.query('lead==10').groupby(['year','month','y']).size().reset_index()
+# q3 = q1.rename(columns={0:'n1','esc':'y'}).merge(q2.rename(columns={0:'n2'}))
+# assert q3.query('n1 != n2').shape[0] == 0
 
 # (iv) Get the "baseline" results: using the previous day's hour
 dat_bl = pd.read_csv(os.path.join(dir_test,'bl_hour.csv'))
@@ -136,7 +100,7 @@ dat_bl = pd.concat([dat_bl, date2ymw(dat_bl.date_rt)],1).merge(freq_woy,'inner')
 # --- (2) FACTORS OF PERFORMANCE --- #
 
 cn_rho = ['date_rt','lead','year','woy','y','pred']
-dat_gp_bl = pd.concat([dat_recent[cn_rho].assign(tt='GP'),dat_bl[cn_rho].assign(tt='Baseline')]).reset_index(None,True)
+dat_gp_bl = pd.concat([dat_recent[cn_rho].assign(tt='Model'),dat_bl[cn_rho].assign(tt='Baseline')]).reset_index(None,True)
 # --- (i) Spearman's rho --- #
 # (a) by lead
 perf_lead = dat_gp_bl.groupby(['tt','lead','year','woy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
@@ -150,8 +114,6 @@ perf_day_woy = perf_day.groupby(['tt','year','woy']).rho.mean().reset_index().me
 
 # # Time trend
 # perf_rho.assign(tidx=lambda x: x.groupby('lead').cumcount()+1).groupby('lead').apply(lambda x: ols(y=x.rho.values,x=x.tidx.values)).reset_index()
-
-
 # (ii) (a) Average level changes, (b) number of escalations, (c) number of esc jumps > 1
 
 
@@ -161,7 +123,7 @@ perf_day_woy = perf_day.groupby(['tt','year','woy']).rho.mean().reset_index().me
 # (4.i) Spearman's correlation over time
 gg_rho_weekly = (ggplot(perf_lead,aes(x='date_rt',y='rho',color='tt')) + 
     theme_bw() + geom_line() + 
-    scale_color_manual(name='Model',labels=['Baseline','GP'],values=['black','red']) + 
+    scale_color_manual(name='Model',values=['black','red']) + 
     facet_wrap('~lead',labeller=label_both,nrow=4) + 
     labs(y="Spearman's rho (weekly)") + 
     theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
@@ -170,13 +132,12 @@ gg_save('gg_rho_weekly.png',dir_figures,gg_rho_weekly,12,8)
 
 gg_rho_daily = (ggplot(perf_day_woy,aes(x='date_rt',y='rho',color='tt')) + 
     theme_bw() + geom_line() + 
-    scale_color_manual(name='Model',labels=['Baseline','GP'],values=['black','red']) + 
+    scale_color_manual(name='Model',values=['black','red']) + 
     labs(y="Spearman's rho") + 
     ggtitle('Weekly average over 24-hour correlation') + 
     theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
     scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
 gg_save('gg_rho_daily.png',dir_figures,gg_rho_daily,5,3.5)
-
 
 ################################
 # --- (3) PRECISION/RECALL --- #
@@ -356,7 +317,30 @@ gg_save('gg_sp_month.png',dir_figures,gg_sp_month,16,height)
 
 
 
+# # (ii) Find the most recent folder with GPY results
+# fn_test = pd.Series(os.listdir(dir_test))
+# fn_test = fn_test[fn_test.str.contains('^[0-9]{4}\\_[0-9]{2}\\_[0-9]{2}$')].reset_index(None,True)
+# dates_test = pd.to_datetime(fn_test,format='%Y_%m_%d')
+# df_fn_test = pd.DataFrame({'fn':fn_test,'dates':dates_test,'has_gpy':False})
+# # Find out which have GP data
+# for fn in fn_test:
+#     fn_fold = pd.Series(os.listdir(os.path.join(dir_test,fn)))
+#     mdls_fold = list(pd.Series(fn_fold.str.split('\\_',2,True).iloc[:,1].unique()).dropna())
+#     if 'gpy' in mdls_fold:
+#         df_fn_test.loc[df_fn_test.fn==fn,'has_gpy'] = True
+# # Get largest date
+# assert df_fn_test.has_gpy.any()
+# fold_recent = df_fn_test.loc[df_fn_test.dates.idxmax()].fn
+# print('Most recent folder: %s' % fold_recent)
+# path_recent = os.path.join(dir_test,fold_recent)
+# fn_recent = pd.Series(os.listdir(path_recent))
 
+# # (iii) Load the predicted/actual
+# fn_res = fn_recent[fn_recent.str.contains('^res\\_.*\\.csv$')]
+# holder = []
+# for fn in fn_res:
+#     holder.append(pd.read_csv(os.path.join(path_recent,fn)))
+# dat_recent = pd.concat(holder).reset_index(None,True)
 
 # # Stability or recall by threshold
 # tmp = df_pr.query('month>0').assign(p=lambda x: pd.Categorical(x.p))

@@ -15,8 +15,8 @@ def cvec(x):
 
 # leads=24; n_bins=5
 class yX_process():
-    def __init__(self, cn, cn_ohe=None, cn_bin=None, cn_cont=None, leads=24, n_bins=5):
-        self.leads = np.arange(leads)+1
+    def __init__(self, cn, cn_ohe=None, cn_bin=None, cn_cont=None, n_bins=5, lead=24, lag=24):
+        self.lead, self.lag = lead, lag
         self.cn_all = pd.Series(cn)
         self.di_cn = {'ohe':cn_ohe, 'bin':cn_bin, 'cont':cn_cont}
         self.enc_X = {'ohe':OneHotEncoder(dtype=int), 
@@ -32,7 +32,7 @@ class yX_process():
         self.di_X = self.di_X.assign(cidx=self.di_X.apply(lambda x: np.where(self.cn_all == x.cn)[0][0], 1))        
 
     # self=enc_yX; X=Xtrain.copy(); y=ytrain.copy()
-    def fit(self, X, y):
+    def fit(self, X, y=None):
         assert isinstance(X,np.ndarray)
         self.p = 0
         self.cn_X = []
@@ -49,39 +49,53 @@ class yX_process():
                     tmp1, tmp2 = tmp_cn.cn.to_list(), self.enc_X[k].bin_edges_
                     tmp3 = [[cn+'_'+str(int(vals[i]))+'-'+str(int(vals[i+1])) for i in range(len(vals)-1)] for cn, vals in zip(tmp1, tmp2)]
                 if k == 'cont':
-                    self.p += len(tmp_cn)
-                    tmp3 = [tmp_cn.cn.to_list()]
+                    q1 = pd.Series(np.tile(tmp_cn.cn,self.lag+1))
+                    q2 = pd.Series(np.repeat(np.arange(self.lag+1),len(tmp_cn.cn)))
+                    tmp3 = [list(q1 + '_lag_' + q2.astype(str))]
+                    self.p += len(tmp3[0])
                 self.cn_X = self.cn_X + list(np.concatenate(tmp3))
         assert len(self.cn_X) == self.p
         # Fit the Y to standard normal
-        self.enc_Y = StandardScaler()
-        self.enc_Y.fit(cvec(y))
+        if y is not None:
+            self.enc_Y = StandardScaler()
+            self.enc_Y.fit(cvec(y))
 
-    # self = enc_yX; X=Xtrain.copy();y=ytrain.copy(); rdrop=1
+    # self = enc_yX; X=Xtrain.copy(); rdrop=1
     def transform_X(self, X, rdrop=1):
         assert isinstance(X,np.ndarray)
         lst = []
         for k in self.di_cn:
             if not self.di_none[k]:
-                lst.append(self.enc_X[k].transform(X[:,self.di_X.query('tt==@k').cidx.values]))
-        sX = sparse.hstack(lst).tocsr()
-        assert sX.shape[1] == self.p
+                X_k = self.enc_X[k].transform(X[:,self.di_X.query('tt==@k').cidx.values])
+                if (k == 'cont') and (self.lag > 0):
+                    X_k = pd.DataFrame(X_k)
+                    X_k = pd.concat([X_k.shift(l) for l in range(self.lag+1)],1).values
+                lst.append(X_k)
+                del X_k
+        if all([isinstance(x,np.ndarray) for x in lst]):
+            X = np.concatenate(lst,axis=1)
+        else:
+            X = sparse.hstack(lst).toarray()
+        X = X[self.lag:]  # Remove missing values from lag
         if rdrop > 0:
-            sX = sX[:-rdrop]
-        return sX
+            X = X[:-rdrop]
+        return X
 
     def transform_y(self, y, rdrop=1):
         assert isinstance(y,np.ndarray)
-        y_leads = pd.concat([pd.Series(y).shift(-k) for k in self.leads],1).values
+        seq_leads = range(1,self.lead+1)
+        y_leads = pd.concat([pd.Series(y).shift(-k) for k in seq_leads],1).values
+        y_leads = y_leads[self.lag:]
         if rdrop > 0:
             y_leads = y_leads[:-rdrop]
-        y_leads = np.hstack([self.enc_Y.transform(y_leads[:,[k-1]]) for k in self.leads])
+        if hasattr(self, 'enc_Y'):
+            y_leads = np.hstack([self.enc_Y.transform(y_leads[:,[k-1]]) for k in seq_leads])
         return y_leads
 
     def inverse_transform_y(self, y):
         assert isinstance(y,np.ndarray)
         if len(y.shape) == 1:
             y = cvec(y)
-        yrev = self.enc_Y.inverse_transform(y)
+        yrev = np.hstack([self.enc_Y.inverse_transform(y[:,[j]]) for j in range(y.shape[1])])
         return yrev
 

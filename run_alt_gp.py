@@ -8,7 +8,13 @@ from funs_support import makeifnot, find_dir_olu, get_date_range
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import r2_score
 from mdls.funs_encode import yX_process
-from mdls.mgpy import mdl
+from mdls.gpy import mdl
+import torch
+
+use_cuda = torch.cuda.is_available()
+sdev = "cuda" if use_cuda else "cpu"
+print('Using device: %s' % sdev)
+device = torch.device(sdev)
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -63,7 +69,8 @@ offset_train = pd.DateOffset(days=dtrain)
 
 cn_ohe = ['date_hour']
 # cn_bin = ['census_max']
-# cn_cont = ['tt_arrived','tt_discharged','date_trend']
+cn_cont = ['census_max','tt_arrived','tt_discharged','date_trend',
+            'avgmd_arrived', 'avgmd_discharged']
 
 holder = []
 for ii in range(1):  #nhours
@@ -78,9 +85,17 @@ for ii in range(1):  #nhours
         print('Current time: %s' % time_ii)
         ytrain, Xtrain = yval[idx_train].copy(), Xmat[idx_train].copy()
         X_now = Xmat[idx_now]
-        enc_yX = yX_process(cn=cn, cn_ohe=cn_ohe, n_bins=10) #, cn_bin=cn_bin, cn_cont=cn_cont
+        enc_yX = yX_process(cn=cn, cn_cont=cn_cont, cn_ohe=cn_ohe, n_bins=10)
         enc_yX.fit(X=Xtrain, y=ytrain)
-        gp_model = mdl(enc_yX)
+        enc_yX.transform_X(Xtrain,rdrop=1).shape
+        enc_yX.transform_y(ytrain,leads=24,rdrop=1).shape
+        self = mdl(encoder=enc_yX, device=device,leads=24)
+        break
+        gp_model.fit(X=Xtrain,y=ytrain,n_steps=250,lr=0.2,tol=1e-8)
+        gp_model.predict(X_now)
+        break
+        pd.DataFrame({'y':ytrain,'hour':Xtrain[:,2]}).groupby('hour').y.std()
+        
         gp_model.fit(Xtrain, ytrain, n_steps=100, lr=0.001,tol=1e-5)
     # Make predictions
     Mu, Sigma, idx = gp_model.predict(X_now)
@@ -98,14 +113,12 @@ df_res.merge(pd.DataFrame({'date_pred':dates,'y':yval}))
 
 from plotnine import *
 dir_figures = os.path.join(dir_olu, 'figures', 'census')
+q1 = np.append(np.where(idx_train)[0],np.arange(15323,15323+24))
+tmp = pd.DataFrame({'y':yval[q1],'date_pred':dates[q1]})
 
-tmp = df_res.assign(doy=lambda x: x.date_rt.dt.strftime('%y-%m-%d'))
-tmp.groupby('doy').apply(lambda x: 
-    pd.Series({'spearman':spearmanr(x.y,x.pred)[0],'r2':r2_score(x.y,x.pred)}))
-
-# gg = (ggplot(df_res,aes(x='date_pred')) + theme_bw() + 
-#     geom_point(aes(y='y'),color='black') + 
-#     geom_line(aes(y='pred')) + 
-#     scale_x_datetime(date_breaks='1 day'))
-# gg.save(os.path.join(dir_figures, 'gg.png'),height=4,width=6)
+gg = (ggplot(tmp,aes(x='date_pred',y='y')) + theme_bw() + 
+    geom_point() + 
+    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+    scale_x_datetime(date_breaks='1 day',date_labels='%d, %b'))
+gg.save(os.path.join(dir_figures, 'gg.png'),height=4,width=6)
 
