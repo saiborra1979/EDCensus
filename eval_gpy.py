@@ -8,6 +8,7 @@ import numpy as np
 from plotnine import *
 from scipy.stats import spearmanr
 from sklearn.metrics import r2_score
+from sklearn.metrics import mean_absolute_error as MAE
 from funs_support import ymdh2date, ymd2date, date2ymw, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
 from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls, ols
 
@@ -101,15 +102,23 @@ dat_bl = pd.concat([dat_bl, date2ymw(dat_bl.date_rt)],1).merge(freq_woy,'inner')
 
 cn_rho = ['date_rt','lead','year','woy','y','pred']
 dat_gp_bl = pd.concat([dat_recent[cn_rho].assign(tt='Model'),dat_bl[cn_rho].assign(tt='Baseline')]).reset_index(None,True)
-# --- (i) Spearman's rho --- #
+# --- (i) Spearman's rho + MAE --- #
 # (a) by lead
-perf_lead = dat_gp_bl.groupby(['tt','lead','year','woy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
-perf_lead = perf_lead.reset_index().rename(columns={0:'rho'}).merge(lookup_woy)
+cn_by_lead = ['tt','lead','year','woy']
+perf_lead = dat_gp_bl.groupby(cn_by_lead).apply(lambda x:  
+    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred)}))
+perf_lead = perf_lead.reset_index().merge(lookup_woy)
+# perf_lead.melt(cn_by_lead)
+# perf_lead = perf_lead.reset_index().rename(columns={0:'rho'}).merge(lookup_woy)
+
 # (b) by day
-perf_day = dat_gp_bl.groupby(['tt','date_rt','year','woy']).apply(lambda x: spearmanr(x.y,x.pred)[0])
-perf_day = perf_day.reset_index().rename(columns={0:'rho'})
+perf_day = dat_gp_bl.groupby(['tt','date_rt','year','woy']).apply(lambda x: 
+    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred)})).reset_index()
+# perf_day = perf_day.reset_index().rename(columns={0:'rho'})
 perf_day = perf_day.merge(freq_woy,'inner',['year','woy'])
-perf_day_woy = perf_day.groupby(['tt','year','woy']).rho.mean().reset_index().merge(lookup_woy)
+perf_day_woy = perf_day.groupby(['tt','year','woy'])[['rho','MAE']].mean().reset_index().merge(lookup_woy)
+
+# --- (ii) MAE --- #
 
 
 # # Time trend
@@ -120,24 +129,40 @@ perf_day_woy = perf_day.groupby(['tt','year','woy']).rho.mean().reset_index().me
 #######################
 # --- (4) FIGURES --- #
 
-# (4.i) Spearman's correlation over time
-gg_rho_weekly = (ggplot(perf_lead,aes(x='date_rt',y='rho',color='tt')) + 
-    theme_bw() + geom_line() + 
-    scale_color_manual(name='Model',values=['black','red']) + 
-    facet_wrap('~lead',labeller=label_both,nrow=4) + 
-    labs(y="Spearman's rho (weekly)") + 
-    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
-gg_save('gg_rho_weekly.png',dir_figures,gg_rho_weekly,12,8)
+di_msr = {'rho':"Spearman's rho",'MAE':"Mean Absolute error"}
 
-gg_rho_daily = (ggplot(perf_day_woy,aes(x='date_rt',y='rho',color='tt')) + 
+for msr in di_msr:
+    # Weekly
+    fn_weekly = 'gg_'+msr+'_weekly.png'
+    gg_weekly = (ggplot(perf_lead,aes(x='date_rt',y=msr,color='tt')) + 
+        theme_bw() + geom_line() + labs(y=di_msr[msr]) + 
+        scale_color_manual(name='Model',values=['black','red']) + 
+        facet_wrap('~lead',labeller=label_both,nrow=4) + 
+        ggtitle('Calculated over week of year') + 
+        theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+        scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
+    gg_save(fn_weekly,dir_figures,gg_weekly,12,8)
+
+    # Daily
+    fn_daily = 'gg_'+msr+'_daily.png'
+    gg_daily = (ggplot(perf_day_woy,aes(x='date_rt',y=msr,color='tt')) + 
+        theme_bw() + geom_line() + labs(y=di_msr[msr]) + 
+        scale_color_manual(name='Model',values=['black','red']) + 
+        ggtitle('Week of year average of hourly 24-hour prediction') + 
+        theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+        scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
+    gg_save(fn_daily,dir_figures,gg_daily,5,3.5)
+
+
+
+gg_MAE_daily = (ggplot(perf_day_woy,aes(x='date_rt',y='MAE',color='tt')) + 
     theme_bw() + geom_line() + 
     scale_color_manual(name='Model',values=['black','red']) + 
-    labs(y="Spearman's rho") + 
+    labs(y="Mean Absolute Error") + 
     ggtitle('Weekly average over 24-hour correlation') + 
     theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
     scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
-gg_save('gg_rho_daily.png',dir_figures,gg_rho_daily,5,3.5)
+gg_save('gg_MAE_daily.png',dir_figures,gg_MAE_daily,5,3.5)
 
 ################################
 # --- (3) PRECISION/RECALL --- #
