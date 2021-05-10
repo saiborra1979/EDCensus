@@ -15,9 +15,9 @@ fi
 
 if [ "$loc" == "c" ]; then
  echo "We are on predator"
- dir_pulls=/mnt/c/Users/erik\ drysdale/Documents/projects/ED/pulls
+ dir_pulls="/mnt/d/projects/ED/pulls"
  dir_hpf="edrysdale@data.ccm.sickkids.ca:/hpf/largeprojects/agoldenb/edrysdale/ED/pulls"
- dir_snow=erik@snowqueen.sickkids.ca:/home/erik/Documents/projects/ED/master/pulls
+ dir_snow="erik@snowqueen.sickkids.ca:/home/erik/Documents/projects/ED/master/pulls"
  # the most recent month
  month=${1}
  year=${2}

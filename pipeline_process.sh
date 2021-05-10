@@ -26,8 +26,6 @@ else
   return
 fi
 
-return
-
 #############################
 # --- (1) PREPROCESSING --- #
 
@@ -38,6 +36,8 @@ python process_demographics.py
 echo "(1.B) process_flow: generate the Xy matrix"
 python process_flow.py --bfreq "1 hour" --ylbl "census_max" --nlags 10
 # output: all_DI.csv, all_labs.csv, df_lead_lags.csv
+
+return
 
 ###########################
 # --- (2) EXPLORATORY --- #
@@ -59,7 +59,9 @@ python explore_AR.py
 ##########################
 # --- (3) MODEL RUNS --- #
 
-echo "(3.A) run_gp.py"
+echo "(3.A) run_bl.py"
+python run_bl.py
+
 # Call source pipeline_GPU.sh on HPF
 #   Adjust --dstart 60 --dend 453 with pipeline_HPF.sh for last day
 #  python -u run_gp.py --lead $ll --model gpy --dtrain 125 --dval 7 --dstart 60 --dend 243

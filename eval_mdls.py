@@ -9,6 +9,7 @@ from plotnine import *
 from scipy.stats import spearmanr
 from sklearn.metrics import r2_score
 from sklearn.metrics import mean_absolute_error as MAE
+from sklearn.metrics import mean_squared_error as MSE
 from funs_support import ymdh2date, ymd2date, date2ymw, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
 from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls, ols
 
@@ -100,23 +101,22 @@ dat_bl = pd.concat([dat_bl, date2ymw(dat_bl.date_rt)],1).merge(freq_woy,'inner')
 ######################################
 # --- (2) FACTORS OF PERFORMANCE --- #
 
+di_msr = {'rho':"Spearman's rho",'MAE':"Mean Absolute error", 'MSE':"Mean Square Error"}
+
 cn_rho = ['date_rt','lead','year','woy','y','pred']
 dat_gp_bl = pd.concat([dat_recent[cn_rho].assign(tt='Model'),dat_bl[cn_rho].assign(tt='Baseline')]).reset_index(None,True)
 # --- (i) Spearman's rho + MAE --- #
 # (a) by lead
 cn_by_lead = ['tt','lead','year','woy']
 perf_lead = dat_gp_bl.groupby(cn_by_lead).apply(lambda x:  
-    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred)}))
+    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred), 'MSE':MSE(x.y,x.pred)}))
 perf_lead = perf_lead.reset_index().merge(lookup_woy)
-# perf_lead.melt(cn_by_lead)
-# perf_lead = perf_lead.reset_index().rename(columns={0:'rho'}).merge(lookup_woy)
 
 # (b) by day
 perf_day = dat_gp_bl.groupby(['tt','date_rt','year','woy']).apply(lambda x: 
-    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred)})).reset_index()
-# perf_day = perf_day.reset_index().rename(columns={0:'rho'})
+    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred), 'MSE':MSE(x.y,x.pred)})).reset_index()
 perf_day = perf_day.merge(freq_woy,'inner',['year','woy'])
-perf_day_woy = perf_day.groupby(['tt','year','woy'])[['rho','MAE']].mean().reset_index().merge(lookup_woy)
+perf_day_woy = perf_day.groupby(['tt','year','woy'])[list(di_msr)].mean().reset_index().merge(lookup_woy)
 
 # --- (ii) MAE --- #
 
@@ -128,8 +128,6 @@ perf_day_woy = perf_day.groupby(['tt','year','woy'])[['rho','MAE']].mean().reset
 
 #######################
 # --- (4) FIGURES --- #
-
-di_msr = {'rho':"Spearman's rho",'MAE':"Mean Absolute error"}
 
 for msr in di_msr:
     # Weekly
