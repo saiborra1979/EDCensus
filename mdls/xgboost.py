@@ -3,25 +3,35 @@ import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor as GBR
 from scipy.stats import spearmanr
 
-class mdl():
-    def __init__(self, encoder, lead=24, lag=24, max_cg=10000):
+# self=model(encoder=enc_yX, lead=lead, lag=lag, di_model=di_model)
+class model():
+    def __init__(self, encoder, lead=24, lag=24, di_model=None):
         self.enc = encoder
         self.lead = np.arange(1,lead+1)
         self.k = lead
         self.lag = lag
         self.isfit = False
+        self.rdrop = min(self.lead)
+        # Set up with the defaults
+        self.di_model = {'n_trees':100, 'depth':3}
+        if di_model is not None:
+            for k, v in di_model.items():
+                assert k in self.di_model
+                self.di_model[k] = int(di_model[k])
 
-    # X, y, n_trees, depth = Xtrain.copy(), ytrain.copy(), 100, 3; self = regressor
-    def fit(self, X, y, n_trees=100, depth=3):
+    # self = regressor; X=Xtrain.copy(); y=ytrain.copy()
+    def fit(self, X, y):
         assert len(X) == len(y)
-        Xtil = self.enc.transform_X(X,rdrop=1)
-        Ytil = self.enc.transform_y(y=y,rdrop=1)
+        Xtil = self.enc.transform_X(X, rdrop=self.rdrop)
+        Ytil = self.enc.transform_y(y, rdrop=self.rdrop)
         assert len(Xtil) == len(Ytil)
         self.di_mdl = {}
         for k in self.lead:
             ytil = Ytil[:,k-1]
             idx_k = ~np.isnan(ytil)
-            self.di_mdl[k] = GBR(random_state=k, n_estimators=n_trees, max_depth=depth)
+            self.di_mdl[k] = GBR(random_state=k, 
+                n_estimators=self.di_model['n_trees'], 
+                max_depth=self.di_model['depth'])
             self.di_mdl[k].fit(Xtil[idx_k],ytil[idx_k])
     
     # X = Xtrain[-25:].copy()

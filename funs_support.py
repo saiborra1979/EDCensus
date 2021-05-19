@@ -19,17 +19,6 @@ from itertools import repeat
 from scipy.stats import norm
 
 
-def get_reg_score(x):
-    tmp = pd.Series({'r2':r2_score(x.y,x.pred), 
-                    'spearman': spearmanr(x.y,x.pred)[0],
-                    'MAE':mean_AE(x.y,x.pred)})
-    return tmp
-
-def get_iqr(x,alpha=0.25):
-    tmp = pd.Series({'mu':x.median(), 'lb':x.quantile(alpha),'ub':x.quantile(1-alpha)})
-    return tmp
-
-
 def get_date_range(x):
     assert isinstance(x,pd.Series)
     dfmt = '%b %d , %H%P'
@@ -330,3 +319,13 @@ def pc_extract(ss, pat):
         return 0
     else:
         return hit.end()
+
+# def get_reg_score(x):
+#     tmp = pd.Series({'r2':r2_score(x.y,x.pred), 
+#                     'spearman': spearmanr(x.y,x.pred)[0],
+#                     'MAE':mean_AE(x.y,x.pred)})
+#     return tmp
+
+# def get_iqr(x,alpha=0.25):
+#     tmp = pd.Series({'mu':x.median(), 'lb':x.quantile(alpha),'ub':x.quantile(1-alpha)})
+#     return tmp

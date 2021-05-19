@@ -3,25 +3,11 @@ SCRIPT TO PERFORM RAW PROCESSING
 NUMBER OF PATIENT AT EACH TIME POINT THAT A NEW PATIENT ARRIVES OR IS DISCHARGED
 """
 
-import argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--bfreq', type=str, default='1 hour', help='Time binning frequency')
-parser.add_argument('--ylbl', type=str, default='census_max', help='Target label')
-parser.add_argument('--nlags', type=int, default=0, help='Max number of lags')
-parser.add_argument('--nleads', type=int, default=25, help='Max number of leads')
-args = parser.parse_args()
-print(args)
-bfreq, ylbl, nlags, nleads = args.bfreq, args.ylbl, args.nlags, args.nleads
-
-# # Debugging in PyCharm
-# bfreq = '1 hour'; ylbl = 'census_max'; nlags = 0; nleads=25
-
 # Load in the required modules
 import os
 import numpy as np
 import pandas as pd
-from funs_support import add_lags, ljoin, date2ymdh, find_dir_olu
+from funs_support import ljoin, date2ymdh, find_dir_olu, ymdh2date
 from Mappings import DI_tags
 
 dir_base = os.getcwd()
@@ -253,9 +239,9 @@ assert hourly_census.shape[0] == num_days * 24 * len(cn_moment)
 hourly_census = hourly_census.pivot_table('value', cn_date, 'moment', dropna=False).reset_index().rename(columns=di_cn)
 # Subset the year/month/day counter
 # Forward fill any census values (i.e. if there are 22 patients at hour 1, and no one arrives/leaves at hour 2, then there are 22 patients at hour 2
-hourly_census = hourly_tt[cn_date].merge(hourly_census, 'left', cn_date).fillna(method='ffill')
-hourly_census['census_max'] = hourly_census.census_max.astype(int)
-hourly_census['census_var'] = hourly_census.census_var.fillna(0)
+hourly_census = hourly_tt[cn_date].merge(hourly_census, 'left', cn_date)
+hourly_census = hourly_census.fillna(method='ffill').fillna(0)
+hourly_census.census_max = hourly_census.census_max.astype(int)
 
 holder = []
 for ii, cn in enumerate(cn_fac):
@@ -294,7 +280,7 @@ hourly_fac.reset_index(inplace=True)
 # (iv) Columns with numerical features (mean, var)
 holder_num = dat_long.groupby(cn_date + ['tt'])[cn_num].mean().reset_index()
 holder_num = hourly_tt_long[cn_date + ['tt']].merge(holder_num, 'left', cn_date + ['tt'])
-holder_num[cn_num] = holder_num.groupby('tt')[cn_num].fillna(method='ffill').fillna(method='bfill')
+holder_num[cn_num] = holder_num.groupby('tt')[cn_num].fillna(method='ffill').fillna(0)
 holder_num = holder_num.pivot_table(cn_num, cn_date, 'tt')
 holder_num.columns = holder_num.columns.to_frame().apply(lambda x: x[0] + '_' + x['tt'], 1).to_list()
 holder_num.reset_index(inplace=True)
@@ -304,23 +290,29 @@ num_mds = (dat_long.md_team.str.count(';') + 1).fillna(0).astype(int)
 holder_avg_mds = dat_long.assign(avg_mds=num_mds).groupby(cn_date + ['tt']).avg_mds.mean().reset_index()
 # Merge and widen
 holder_avg_mds = hourly_tt_long[cn_date + ['tt']].merge(holder_avg_mds, 'left', cn_date + ['tt'])
-holder_avg_mds['avg_mds'] = holder_avg_mds.groupby('tt').avg_mds.fillna(method='ffill').fillna(method='bfill')
+holder_avg_mds['avg_mds'] = holder_avg_mds.groupby('tt').avg_mds.fillna(method='ffill').fillna(0)
 holder_avg_mds = holder_avg_mds.pivot_table('avg_mds', cn_date, 'tt').add_prefix('avgmd_').reset_index()
 
 # Now apply for doctor count
-tmp = dat_clin[['arrived', 'md_team']].assign(year=lambda x: x.arrived.dt.year, month=lambda x: x.arrived.dt.month, day=lambda x: x.arrived.dt.day, hour=lambda x: x.arrived.dt.hour).drop(columns=['arrived'])
+tmp = dat_clin[['arrived', 'md_team']].copy()
+tmp = pd.concat([tmp,date2ymdh(tmp.arrived)],1).drop(columns=['arrived'])
 tmp = hourly_tt[cn_date].merge(tmp[tmp.md_team.notnull()], 'left', cn_date)
 tmp['md_team'] = tmp.md_team.fillna('').str.split(';')
 tmp.index = tmp[cn_date].astype(str).assign(
     date=lambda x: pd.to_datetime(x.year + '-' + x.month + '-' + x.day + ' ' + x.hour + ':00:00')).date
 tmp = tmp.groupby('date').md_team.apply(lambda x: set(ljoin(x)))
 holder = np.repeat(np.NaN, tmp.shape[0])
-for ii in range(nlags, tmp.shape[0]):
+nhours = 10
+for ii in range(nhours, tmp.shape[0]):
     if ((ii + 1) % 5000) == 0:
         print(ii + 1)
-    holder[ii] = len(set(ljoin(tmp.iloc[ii - 10:ii])))
-holder = pd.Series(holder, index=tmp.index).fillna(method='bfill').astype(int)
-holder_u_mds = pd.DataFrame(holder, columns=['u_mds10h']).reset_index().assign(year=lambda x: x.date.dt.year,month=lambda x: x.date.dt.month, day=lambda x: x.date.dt.day, hour=lambda x: x.date.dt.hour).drop(columns=['date'])
+    # Remove no doctors from the set
+    holder[ii] = len(set(ljoin(tmp.iloc[ii - nhours:ii])) - {''})
+holder = pd.Series(holder, index=tmp.index)
+assert holder.isnull().sum() == nhours
+holder = holder.fillna(0).astype(int)
+holder_u_mds = pd.DataFrame(holder, columns=['u_mds10h']).reset_index()
+holder_u_mds = pd.concat([holder_u_mds,date2ymdh(holder_u_mds.date)],1).drop(columns=['date'])
 
 # (v) Merge labs/DI with exiting hour range
 dat_labs_flow = hourly_tt[cn_date].merge(dat_labs_flow, 'left', cn_date).fillna(0).astype(int)
@@ -337,29 +329,16 @@ dat_DI_flow = hourly_tt[cn_date].merge(dat_DI_flow, 'left', cn_date).fillna(0).a
 ########################################
 # --- STEP 7: MERGE ALL DATA TYPES --- #
 
-# X features
-hourly_X = hourly_census.merge(hourly_tt.drop(columns='date'), 'left', cn_date)
-hourly_X = hourly_X.merge(holder_avg_mds, 'left', cn_date).merge(holder_u_mds, 'left', cn_date)
-hourly_X = hourly_X.merge(holder_num, 'left', cn_date).merge(hourly_fac, 'left', cn_date)
-hourly_X = hourly_X.merge(dat_labs_flow, 'left', cn_date).merge(dat_DI_flow, 'left', cn_date)
-assert hourly_X.notnull().all().all()
-# Create "lags" for the X features: t+0, t-1, ..., t-L
-lags = np.arange(nlags + 1)
-cn_X = list(hourly_X.columns.drop(cn_date))
-tmp_idx = pd.MultiIndex.from_frame(hourly_X[cn_date])
-hourly_X = pd.concat([add_lags(hourly_X[cn_X], ll) for ll in lags], 1)
-hourly_X = hourly_X.set_index(tmp_idx)
-if nlags > 0:
-    hourly_X = hourly_X.set_index(tmp_idx).iloc[nlags:-nlags]
+# All features/labels
+hourly_yX = hourly_census.merge(hourly_tt.drop(columns='date'), 'left', cn_date)
+hourly_yX = hourly_yX.merge(holder_avg_mds, 'left', cn_date).merge(holder_u_mds, 'left', cn_date)
+hourly_yX = hourly_yX.merge(holder_num, 'left', cn_date).merge(hourly_fac, 'left', cn_date)
+hourly_yX = hourly_yX.merge(dat_labs_flow, 'left', cn_date).merge(dat_DI_flow, 'left', cn_date)
+assert hourly_yX.notnull().all().all()
+# Add on day_of_week and date
+hourly_yX.insert(0,'date',ymdh2date(hourly_yX[cn_date]))
+hourly_yX.insert(1,'dow',hourly_yX.date.dt.dayofweek)
 
-# y-labels
-leads = -np.arange(nleads)
-hourly_Y = pd.DataFrame(np.vstack([hourly_census[ylbl].shift(z).values for z in leads]).T)
-hourly_Y = hourly_Y.set_index(pd.MultiIndex.from_frame(hourly_census[cn_date]))
-hourly_Y.columns = pd.MultiIndex.from_product([['y'], ['lead_' + str(z) for z in np.abs(leads)]])
-hourly_Y = hourly_Y.iloc[nlags:-nleads].astype(int)
-
-# Merge data and save for later
-df_lead_lags = hourly_Y.join(hourly_X)
-df_lead_lags.to_csv(os.path.join(dir_flow, 'df_lead_lags.csv'), index=True)
+# Save for later
+hourly_yX.to_csv(os.path.join(dir_flow, 'hourly_yX.csv'), index=False)
 print('End of process_flow.py script')

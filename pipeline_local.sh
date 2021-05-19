@@ -26,6 +26,12 @@ else
   return
 fi
 
+
+python run_mdl.py --model_name xgboost --model_args n_trees=100,depth=3 \
+  --lead 24 --lag 24 --dtrain 8 --h_retrain 24 --ylbl census_max
+
+return
+
 #############################
 # --- (1) PREPROCESSING --- #
 
@@ -34,10 +40,8 @@ python process_demographics.py
 # output: demo4flow.csv
 
 echo "(1.B) process_flow: generate the Xy matrix"
-python process_flow.py --bfreq "1 hour" --ylbl "census_max" --nlags 10
-# output: all_DI.csv, all_labs.csv, df_lead_lags.csv
-
-return
+python process_flow.py
+# output: all_DI.csv, all_labs.csv, hourly_yX.csv
 
 ###########################
 # --- (2) EXPLORATORY --- #
@@ -50,14 +54,16 @@ echo "(2.B) explore_beds.py"
 python explore_beds.py
 # output: None
 
-echo "(2.C) explore_AR.py: summary stats"
-python explore_AR.py
-# output: gg_err_lead, gg_scat_lead, gg_err_dist
-#         gg_err_ord, gg_qreg, gg_qreg_linear, gg_qreg_GBR, gg_np_quant
+# echo "(2.C) explore_AR.py: summary stats"
+# python explore_AR.py
+# # output: gg_err_lead, gg_scat_lead, gg_err_dist
+# #         gg_err_ord, gg_qreg, gg_qreg_linear, gg_qreg_GBR, gg_np_quant
 
 
 ##########################
 # --- (3) MODEL RUNS --- #
+
+
 
 echo "(3.A) run_bl.py"
 python run_bl.py

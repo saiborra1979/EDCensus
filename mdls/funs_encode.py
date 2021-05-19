@@ -31,15 +31,15 @@ class yX_process():
         self.di_X = pd.concat([None if v is None else pd.DataFrame({'tt':k,'cn':v},index=range(len(v))) for k,v in self.di_cn.items()]).reset_index(None,True)
         self.di_X = self.di_X.assign(cidx=self.di_X.apply(lambda x: np.where(self.cn_all == x.cn)[0][0], 1))        
 
-    # self=enc_yX; X=Xtrain.copy(); y=ytrain.copy()
+    # self=enc_yX; X=Xtrain.copy(); y=None
     def fit(self, X, y=None):
-        assert isinstance(X,np.ndarray)
+        assert isinstance(X, pd.DataFrame)
         self.p = 0
         self.cn_X = []
         for k in self.di_cn:
             if not self.di_none[k]:
                 tmp_cn = self.di_X.query('tt==@k')
-                self.enc_X[k].fit(X[:,tmp_cn.cidx.values])
+                self.enc_X[k].fit(X[tmp_cn.cn])
                 if k == 'ohe':
                     self.p += sum([len(z) for z in self.enc_X[k].categories_])
                     tmp1, tmp2 = tmp_cn.cn.to_list(), self.enc_X[k].categories_
@@ -62,11 +62,11 @@ class yX_process():
 
     # self = enc_yX; X=Xtrain.copy(); rdrop=1
     def transform_X(self, X, rdrop=1):
-        assert isinstance(X,np.ndarray)
+        assert isinstance(X, pd.DataFrame)
         lst = []
         for k in self.di_cn:
             if not self.di_none[k]:
-                X_k = self.enc_X[k].transform(X[:,self.di_X.query('tt==@k').cidx.values])
+                X_k = self.enc_X[k].transform(X[self.di_X.query('tt==@k').cn])
                 if (k == 'cont') and (self.lag > 0):
                     X_k = pd.DataFrame(X_k)
                     X_k = pd.concat([X_k.shift(l) for l in range(self.lag+1)],1).values
