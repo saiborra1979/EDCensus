@@ -26,12 +26,6 @@ else
   return
 fi
 
-
-python run_mdl.py --model_name xgboost --model_args n_trees=100,depth=3 \
-  --lead 24 --lag 24 --dtrain 8 --h_retrain 24 --ylbl census_max
-
-return
-
 #############################
 # --- (1) PREPROCESSING --- #
 
@@ -42,6 +36,8 @@ python process_demographics.py
 echo "(1.B) process_flow: generate the Xy matrix"
 python process_flow.py
 # output: all_DI.csv, all_labs.csv, hourly_yX.csv
+
+return
 
 ###########################
 # --- (2) EXPLORATORY --- #

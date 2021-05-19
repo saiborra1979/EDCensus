@@ -18,8 +18,11 @@ for rtrain in $retrain_seq; do
 	echo "Iteration: "$i
 	perm="n_trees="$n_tree"_depth="$depth"_dtrain="$dtrain"_rtrain="$rtrain
 	echo $perm
-	qsub -N xgboost_$perm -e $dir_err/perm+'.txt' -v n_tree=$n_tree,depth=$depth,dtrain=$dtrain,rtrain=$rtrain hpf_xgboost.sh
+	qsub -N xgboost_$perm -v n_tree=$n_tree,depth=$depth,dtrain=$dtrain,rtrain=$rtrain hpf_xgboost.sh
+#	return
 done
 done
 done
 done
+
+echo "End of hpf_hyperparameter.sh"
