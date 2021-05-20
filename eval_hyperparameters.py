@@ -1,15 +1,28 @@
-# Performs analysis on the most recent year-month-day folder
+"""
+SEARCHES THROUGH ~/test FOLDER TO FIND PERFORMANCE FOR DIFFERENT MODEL CONFIGS
+"""
+
+# Calls class from ~/mdls folder
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--model_list', nargs='+', help='Model classes to evaluate (xgboost lasso)')
+args = parser.parse_args()
+model_list = args.model_list
+print(model_list)
+assert isinstance(model_list, list)
+
+# For debugging
+model_list = ['xgboost']
 
 import os
 import pandas as pd
 import numpy as np
 from plotnine import *
 from scipy.stats import spearmanr
-from sklearn.metrics import r2_score
 from sklearn.metrics import mean_absolute_error as MAE
 from sklearn.metrics import mean_squared_error as MSE
-from funs_support import ymdh2date, ymd2date, date2ymw, date2ymd, find_dir_olu, gg_color_hue, gg_save, makeifnot
-from funs_stats import add_bin_CI, get_CI, ordinal_lbls, prec_recall_lbls, ols
+from funs_support import ymdh2date, date2ymw, find_dir_olu, gg_color_hue, gg_save, makeifnot
+from funs_stats import add_bin_CI, ordinal_lbls, prec_recall_lbls
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -32,53 +45,79 @@ di_metric = {'tp':'TP', 'fp':'FP', 'fn':'FN', 'pos':'Positive'}
 colz_gg = ['black'] + gg_color_hue(3)
 lblz = ['≥0', '1', '2', '3']
 
-#########################
-# --- (1) LOAD DATA --- #
+################################
+# --- (1) PREPARE BASELINE --- #
 
-fn_test = pd.Series(os.listdir(dir_test))
+cn_ymdh = ['year', 'month', 'day', 'hour']
+cn_dates = ['date_rt','date_pred']
+idx = pd.IndexSlice
+
+fn_test = os.listdir(dir_test)
 
 # (i) Load the real-time y
-cn_ymdh = ['year', 'month', 'day', 'hour']
-idx = pd.IndexSlice
-act_y = pd.read_csv(os.path.join(dir_flow, 'df_lead_lags.csv'), header=[0,1], index_col=[0,1,2,3])
-act_y = act_y.loc[:,idx['y','lead_0']].reset_index().droplevel(1,1)
-act_y.rename(columns={'y':'y_rt'},inplace=True)
-act_y = act_y.assign(date_rt=ymdh2date(act_y)).drop(columns=cn_ymdh)[['date_rt','y_rt']]
+act_y = pd.read_csv(os.path.join(dir_flow, 'hourly_yX.csv'),usecols=['date','census_max'])
+act_y.rename(columns={'census_max':'y', 'date':'date_rt'},inplace=True)
+act_y.date_rt = pd.to_datetime(act_y.date_rt)
+# Compare
+act_y_2 = pd.read_csv(os.path.join(dir_flow, 'hourly_yX_hpf.csv'),usecols=['date','census_max'])
+act_y_2.rename(columns={'census_max':'y', 'date':'date_rt'},inplace=True)
+act_y_2.date_rt = pd.to_datetime(act_y_2.date_rt)
 
-# (ii) Load model benchmark
-cn_dates = ['date_rt','date_pred']
-fn_mdl = fn_test[fn_test.str.contains('xgboost')].to_list()[0]
-dat_recent = pd.read_csv(os.path.join(dir_test,fn_mdl))
-dat_recent[cn_dates] = dat_recent[cn_dates].apply(pd.to_datetime)
-dat_recent = dat_recent.sort_values(['lead','date_rt']).reset_index(None,True)
-# Add on the date columns
-dat_recent = dat_recent.assign(doy=lambda x: x.date_rt.dt.strftime('%Y-%m-%d'))
-dat_recent = pd.concat([dat_recent, date2ymw(dat_recent.date_rt)],1)
+qq = act_y.merge(act_y_2,on='date_rt',suffixes=('_local','_hpf'))
+qq = qq.assign(err=lambda x: x.y_local - x.y_hpf)
+qq.query('y_local == y_hpf')
+qq.query('y_local != y_hpf').err.describe()
 
-# Keep only full week of years
-freq_woy = dat_recent.groupby(['woy','year']).size().reset_index().rename(columns={0:'n'})
-freq_woy = freq_woy.query('n == n.max()').drop(columns='n')
+
+# (ii) Load the benchmark result
+dat_bl = pd.read_csv(os.path.join(dir_test,'bl_hour.csv'))
+dat_bl[cn_dates] = dat_bl[cn_dates].apply(pd.to_datetime,0)
+dat_bl = pd.concat([date2ymw(dat_bl.date_rt), dat_bl],1)
+
+# (iii) WOY lookup dictionary
+freq_woy = dat_bl.groupby(['woy','year']).size().reset_index()
+freq_woy = freq_woy.rename(columns={0:'n'}).sort_values(['year','woy'])
+freq_woy = freq_woy.query('n == n.max()').reset_index(None,True).drop(columns='n')
 # Mappings of year/woy to date
-lookup_woy = dat_recent.groupby(['year','woy']).date_rt.min().reset_index()
+lookup_woy = dat_bl.groupby(['year','woy']).date_rt.min().reset_index()
 lookup_woy = lookup_woy.merge(freq_woy,'inner')
+# Subset to date range
+dat_bl = dat_bl.merge(freq_woy,'inner')
 
-# Subset to only full weeks
-dat_recent = dat_recent.merge(freq_woy,'inner')
-
-# Get the y-ranges
-ymi, ymx = dat_recent.pred.min()-1, dat_recent.pred.max()+1
-ymi, ymx = min(ymi, act_y.y_rt.min()), max(ymx, act_y.y_rt.max())
-esc_bins = [ymi - 1, 31, 38, 48, ymx + 1]
+# (iv) Get escalation levels
+esc_bins = [-1000, 31, 38, 48, 1000]
 esc_lbls = ['≤30', '31-37', '38-47', '≥48']
 esc_lvls = [0,1,2,3]
+act_y = act_y.assign(esc_rt=lambda x: pd.Categorical(pd.cut(x.y_rt, esc_bins, False, esc_lbls)).codes)
+# act_y.query('date_rt>@dat_bl.date_rt.min()').esc_rt.value_counts(True)
 
-# Calculate the different escalation levels
-cn_esc = ['lead','date_rt','y_rt','y'] #,'date_pred'
-act_esc = dat_recent[cn_esc].copy()
-tmp = act_esc[['y_rt','y']].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
-act_esc = pd.concat([act_esc,tmp.rename(columns={'y':'esc','y_rt':'esc_rt'})],1)
-act_esc = act_esc.assign(esc = lambda x: x.esc - x.esc_rt)
-act_esc = pd.concat([act_esc,date2ymw(act_esc.date_rt)],1)
+#################################
+# --- (2) MODEL PERFORMANCE --- #
+
+# (iv) Load in the different model classes
+holder = []
+for model in model_list:
+    assert model in fn_test
+    path_model = os.path.join(dir_test, model)
+    fn_model = os.listdir(path_model)
+    for fn in fn_model:
+        params = fn.replace('.csv','').split('+')
+        params = pd.DataFrame([param.split('=') for param in params])
+        params.rename(columns={0:'tt',1:'val'},inplace=True)
+        # Load data
+        df = pd.read_csv(os.path.join(path_model, fn))
+        df[cn_dates] = df[cn_dates].apply(pd.to_datetime, 0)
+        df = pd.concat([date2ymw(df.date_rt), df],1)
+        # Calculate aggregate performance
+        df = df.merge(freq_woy,'inner')
+        assert len(df) == len(dat_bl)
+        qq = df.drop(columns='month').merge(act_y,'inner',on=['date_rt'])
+        qq.query('y_rt_x!=y_rt_y').loc[361]
+        df.date_rt.describe()
+        act_y.date_rt.describe()
+
+        
+
 
 # # Calculate the change in escalation levels
 # cn_pr = ['date_rt','year','month','lead','y','y_rt','pred','se']
@@ -91,13 +130,11 @@ act_esc = pd.concat([act_esc,date2ymw(act_esc.date_rt)],1)
 # q3 = q1.rename(columns={0:'n1','esc':'y'}).merge(q2.rename(columns={0:'n2'}))
 # assert q3.query('n1 != n2').shape[0] == 0
 
-# (iv) Get the "baseline" results: using the previous day's hour
-dat_bl = pd.read_csv(os.path.join(dir_test,'bl_hour.csv'))
-dat_bl[cn_dates] = dat_bl[cn_dates].apply(pd.to_datetime,0)
-dat_bl = pd.concat([dat_bl, date2ymw(dat_bl.date_rt)],1).merge(freq_woy,'inner')
-
 ######################################
 # --- (2) FACTORS OF PERFORMANCE --- #
+
+
+
 
 di_msr = {'rho':"Spearman's rho",'MAE':"Mean Absolute error", 'MSE':"Mean Square Error"}
 

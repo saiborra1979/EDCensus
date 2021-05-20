@@ -1,14 +1,6 @@
 """
 SCRIPT TO COMPARE MODEL PERFORMANCE TO THE ESLCATION LEVELS
 """
-
-# import argparse
-# parser = argparse.ArgumentParser()
-# parser.add_argument('--nleads', type=int, default=25, help='Number of leads from process_flow.py')
-# args = parser.parse_args()
-# print(args)
-# nleads = args.nleads
-
 import os
 import pandas as pd
 import numpy as np

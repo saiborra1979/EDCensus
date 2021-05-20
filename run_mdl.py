@@ -101,11 +101,12 @@ for ii in range(nhours):
     idx_train = ((dates >= s_train) & (dates <= time_ii)).values
     dates_train = dates[idx_train].reset_index(None,True)
     ytrain, Xtrain = yval[idx_train].copy(), df_X[idx_train].copy()
-    X_now = Xtrain[-(lag+1):]  # Ensure enough rows to calculate lags    
+    X_now = Xtrain[-(lag+1):]  # Ensure enough rows to calculate lags
     if ii % h_retrain == 0:
         print('Training range: %s' % (get_date_range(dates_train)))
         print('Current time: %s' % time_ii)
-        enc_yX = yX_process(cn=cn_all, cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], lead=lead, lag=lag)
+        enc_yX = yX_process(cn=cn_all, lead=lead, lag=lag, 
+                cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], cn_bin=di_cn['bin'])
         enc_yX.fit(X=Xtrain)
         regressor = model(encoder=enc_yX, lead=lead, lag=lag, di_model=di_model)
         regressor.fit(X=Xtrain, y=ytrain)

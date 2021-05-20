@@ -1,57 +1,39 @@
 import os
-import sys
 import numpy as np
 import pandas as pd
 from time import time
-from datetime import datetime
 from mdls.funs_encode import yX_process
-from funs_support import makeifnot, find_dir_olu, get_date_range, gg_save
-from sklearn.metrics import r2_score
-from scipy.stats import spearmanr
+from funs_support import find_dir_olu, get_date_range
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
 dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
-# dir_save = os.path.join(dir_test, datetime.now().strftime('%Y_%m_%d'))
-# makeifnot(dir_save)
 
-idx = pd.IndexSlice
-use_cuda = torch.cuda.is_available()
-sdev = "cuda" if use_cuda else "cpu"
-print('Using device: %s' % sdev)
-device = torch.device(sdev)
+ylbl = 'census_max'
 
 ####################################
 # --- STEP 1: LOAD/CREATE DATA --- #
 print('# --- STEP 1: LOAD/CREATE DATA --- #')
 
 # Get dataframe
-df_lead_lags = pd.read_csv(os.path.join(dir_flow, 'df_lead_lags.csv'), header=[0, 1], index_col=[0, 1, 2, 3])
-# Create dates
-dates = df_lead_lags.index.to_frame().astype(str).assign(
-    date=lambda x: pd.to_datetime(x.year + '-' + x.month + '-' + x.day + ' ' + x.hour + ':00:00')).date
-# Extract y (lead_0 is the current value)
-yval = df_lead_lags.loc[:, idx[:, 'lead_0']].values.flatten()
-# Remove lags (GP handles them automatically in the kernel)
-Xmat = df_lead_lags.loc[:, idx[:, 'lag_0']].droplevel(1, 1)
-cn = list(Xmat.columns)
-Xmat = Xmat.values
-# Extract date features (remove year/month)
-tmat = dates.index.droplevel([0, 1]).to_frame(False).reset_index().rename(columns={'index': 'trend'})
-Xmat = np.hstack([tmat.values, Xmat])
-cn = list('date_' + tmat.columns) + cn
-assert len(cn) == Xmat.shape[1]
+df_X = pd.read_csv(os.path.join(dir_flow, 'hourly_yX.csv'))
+df_X.date = pd.to_datetime(df_X.date)
+# print(df_X.loc[10000])
+# Extract y
+yval = df_X[ylbl].values
+dates = df_X.date.copy()
 
 ######################################
 # --- STEP 2: CREATE DATE-SPLITS --- #
 print('# --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #')
 
-dtrain = 1
+dtrain = 2
 h_retrain = 1
+lag = 24
+lead = 24
 assert isinstance(dtrain,int) & isinstance(h_retrain,int)
-
 
 dfmt = '%Y-%m-%d'
 dmax = pd.to_datetime((dates.max()-pd.DateOffset(days=1)).strftime(dfmt))
@@ -62,40 +44,42 @@ print('day start: %s, day stop: %s (hours=%i, days=%i)' %
     (dmin.strftime(dfmt),dmax.strftime(dfmt),nhours, ndays))
 
 offset_train = pd.DateOffset(days=dtrain)
+print(offset_train)
 
 ########################################
 # --- STEP 3: TRAIN BASELINE MODEL --- #
 
-cn_ohe = ['date_hour']
-cn_num = None#['census_max']
-cn_cont = ['date_trend']
+di_cn = {'ohe':['hour'], 'bin':None, 'cont':None}  #['date_trend']
+cn_all = list(df_X.columns)
 
 holder = []
-for ii in range(nhours):  #nhours
+for ii in range(nhours):
     time_ii = dmin + pd.DateOffset(hours=ii)  # Current day/hour
-    hour = ii % 24  # Extract hour
-    idx_now = (dates == time_ii).values
+    s_train = time_ii - offset_train  # start time
+    idx_train = ((dates >= s_train) & (dates <= time_ii)).values
+    dates_train = dates[idx_train].reset_index(None,True)
+    ytrain, Xtrain = yval[idx_train].copy(), df_X[idx_train].copy()
+    X_now = Xtrain[-(lag+1):]  # Ensure enough rows to calculate lags
     if (ii+1) % h_retrain == 0:
-        s_train = time_ii - offset_train  # start time
-        idx_train = ((dates >= s_train) & (dates <= time_ii)).values
-        dates_train = dates[idx_train].reset_index(None,True)
         if ii % 24 == 0:
             print('Training range: %s' % (get_date_range(dates_train)))
             print('Current time: %s' % time_ii)
-        ytrain, Xtrain = yval[idx_train].copy(), Xmat[idx_train].copy()
         # Fit encoder
-        processor = yX_process(cn=cn, cn_ohe=cn_ohe, cn_num=cn_num)
+        processor = yX_process(cn=cn_all, lead=lead, lag=lag, 
+                cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], cn_bin=di_cn['bin'])
         processor.fit(X=Xtrain)
         # Get the X, y data
-        Xtil, ytil = processor.transform(Xtrain, ytrain)
+        Xtil = processor.transform_X(Xtrain)
+        ytil = processor.transform_y(ytrain)
         # Calculate inverse gram matrix
-        igram = np.linalg.pinv((Xtil.T.dot(Xtil)).toarray())
+        igram = np.linalg.pinv((Xtil.T.dot(Xtil)))
         ixy = Xtil.T.dot(np.where(np.isnan(ytil),0,ytil))
         ibhat = igram.dot(ixy)
     # Get the current X
-    X_curr = processor.transform(Xtrain[[-1]],rdrop=0).toarray()
+    X_curr = processor.transform_X(X_now,rdrop=0)
     y_pred = X_curr.dot(ibhat).flatten()
-    df_pred = pd.DataFrame({'date_rt':time_ii,'lead':processor.leads,'pred':y_pred})
+    df_pred = pd.DataFrame({'date_rt':time_ii,
+        'lead':np.arange(processor.lead)+1,'pred':y_pred})
     holder.append(df_pred)
 # Merge
 df_res = pd.concat(holder).reset_index(None,True)
@@ -106,6 +90,10 @@ df_res = df_res.merge(pd.DataFrame({'date_rt':dates,'y_rt':yval}))
 # Save for later
 df_res.to_csv(os.path.join(dir_test, 'bl_hour.csv'),index=False)
 
+# from scipy.stats import spearmanr
+# from sklearn.metrics import mean_absolute_error as MAE
+# df_res.groupby('lead').apply(lambda x: MAE(x.y, x.pred))
+# df_res.groupby('lead').apply(lambda x: spearmanr(x.pred, x.y)[0])
 
 # # Make a plot
 # from plotnine import *
