@@ -15,8 +15,8 @@ lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
 # # For debugging
-# dtrain=1; h_retrain=24; lag=24; lead=24; 
-# model_args='n_trees=100,depth=3'; model_name='xgboost'; ylbl='census_max'
+# dtrain=30; h_retrain=48; lag=24; lead=24; 
+# model_args='n_trees=200,depth=5,n_jobs=6'; model_name='xgboost'; ylbl='census_max'
 
 import os
 import numpy as np
@@ -62,7 +62,6 @@ print('# --- STEP 1: LOAD/CREATE DATA --- #')
 # Get dataframe
 df_X = pd.read_csv(os.path.join(dir_flow, 'hourly_yX.csv'))
 df_X.date = pd.to_datetime(df_X.date)
-# print(df_X.loc[10000])
 # Extract y
 yval = df_X[ylbl].values
 dates = df_X.date.copy()
@@ -123,6 +122,7 @@ df_res = df_res.assign(date_pred=lambda x: x.date_rt + x.lead*pd.offsets.Hour(1)
 df_res = df_res.merge(pd.DataFrame({'date_rt':dates,'y_rt':yval}))
 df_res = df_res.merge(pd.DataFrame({'date_pred':dates,'y':yval}))
 df_res = df_res.sort_values(['date_rt','lead']).reset_index(None,True)
+
 
 # from plotnine import *
 # dir_figures = os.path.join(dir_olu, 'figures', 'census')

@@ -4,6 +4,8 @@ SEARCHES THROUGH ~/test FOLDER TO FIND PERFORMANCE FOR DIFFERENT MODEL CONFIGS
 
 # Calls class from ~/mdls folder
 import argparse
+
+from numpy.lib.arraysetops import isin
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_list', nargs='+', help='Model classes to evaluate (xgboost lasso)')
 args = parser.parse_args()
@@ -21,8 +23,8 @@ from plotnine import *
 from scipy.stats import spearmanr
 from sklearn.metrics import mean_absolute_error as MAE
 from sklearn.metrics import mean_squared_error as MSE
-from funs_support import ymdh2date, date2ymw, find_dir_olu, gg_color_hue, gg_save, makeifnot
-from funs_stats import add_bin_CI, ordinal_lbls, prec_recall_lbls
+from funs_support import date2ymw, find_dir_olu, get_reg_score, get_iqr, gg_save #gg_color_hue
+from funs_stats import get_esc_levels, add_bin_CI, prec_recall_lbls
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -56,23 +58,14 @@ fn_test = os.listdir(dir_test)
 
 # (i) Load the real-time y
 act_y = pd.read_csv(os.path.join(dir_flow, 'hourly_yX.csv'),usecols=['date','census_max'])
-act_y.rename(columns={'census_max':'y', 'date':'date_rt'},inplace=True)
+act_y.rename(columns={'census_max':'y_rt', 'date':'date_rt'},inplace=True)
 act_y.date_rt = pd.to_datetime(act_y.date_rt)
-# Compare
-act_y_2 = pd.read_csv(os.path.join(dir_flow, 'hourly_yX_hpf.csv'),usecols=['date','census_max'])
-act_y_2.rename(columns={'census_max':'y', 'date':'date_rt'},inplace=True)
-act_y_2.date_rt = pd.to_datetime(act_y_2.date_rt)
-
-qq = act_y.merge(act_y_2,on='date_rt',suffixes=('_local','_hpf'))
-qq = qq.assign(err=lambda x: x.y_local - x.y_hpf)
-qq.query('y_local == y_hpf')
-qq.query('y_local != y_hpf').err.describe()
-
 
 # (ii) Load the benchmark result
 dat_bl = pd.read_csv(os.path.join(dir_test,'bl_hour.csv'))
 dat_bl[cn_dates] = dat_bl[cn_dates].apply(pd.to_datetime,0)
 dat_bl = pd.concat([date2ymw(dat_bl.date_rt), dat_bl],1)
+# dat_bl[['date_rt','y_rt','lead']].merge(act_y,'left',on='date_rt').query('y_rt_x != y_rt_y')
 
 # (iii) WOY lookup dictionary
 freq_woy = dat_bl.groupby(['woy','year']).size().reset_index()
@@ -87,48 +80,119 @@ dat_bl = dat_bl.merge(freq_woy,'inner')
 # (iv) Get escalation levels
 esc_bins = [-1000, 31, 38, 48, 1000]
 esc_lbls = ['≤30', '31-37', '38-47', '≥48']
-esc_lvls = [0,1,2,3]
-act_y = act_y.assign(esc_rt=lambda x: pd.Categorical(pd.cut(x.y_rt, esc_bins, False, esc_lbls)).codes)
-# act_y.query('date_rt>@dat_bl.date_rt.min()').esc_rt.value_counts(True)
+act_y = get_esc_levels(act_y,['y_rt'],esc_bins, esc_lbls)
+# Create prediction versoin
+pred_y = act_y.rename(columns={'date_rt':'date_pred','y_rt':'y','esc_y_rt':'esc_y'})
+
+# act_y.query('date_rt>@dat_bl.date_rt.min()').esc_y_rt.value_counts(True)
 
 #################################
 # --- (2) MODEL PERFORMANCE --- #
 
-# (iv) Load in the different model classes
-holder = []
+cn_model = ['date_rt','date_pred','lead','pred']
+cn_reg = ['year','woy','lead']
+cn_ord = ['y_delta','pred_delta','date_rt','lead']
+
+# (i) Baseline performance
+res_bl = dat_bl[cn_model+['year','woy']].copy()
+res_bl = res_bl.merge(act_y,'inner',on='date_rt')
+res_bl = res_bl.merge(pred_y,'inner','date_pred')
+res_bl = get_esc_levels(res_bl,['pred'],esc_bins, esc_lbls)
+res_bl = res_bl.assign(y_delta=lambda x: np.sign(x.esc_y - x.esc_y_rt),
+                pred_delta = lambda x: np.sign(x.esc_pred - x.esc_y_rt) )
+bl_reg = res_bl.groupby(cn_reg).apply(get_reg_score).reset_index()
+bl_reg = bl_reg.melt(cn_reg,None,'metric').groupby(['lead','metric']).value.apply(get_iqr)
+bl_reg = bl_reg.reset_index().pivot_table('value',['lead','metric'],'level_2').reset_index()
+bl_reg['model_name'] = 'bl'
+# classification
+bl_ord = prec_recall_lbls(x=res_bl[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
+bl_ord = bl_ord.query('pred_delta == 1').reset_index(None, True)
+
+# (ii) Load in the different model classes
+holder_reg, holder_ord = [], []
 for model in model_list:
     assert model in fn_test
     path_model = os.path.join(dir_test, model)
     fn_model = os.listdir(path_model)
-    for fn in fn_model:
+    for i, fn in enumerate(fn_model):
+        print('fn: %s (%i)' % (fn,i+1))
         params = fn.replace('.csv','').split('+')
         params = pd.DataFrame([param.split('=') for param in params])
         params.rename(columns={0:'tt',1:'val'},inplace=True)
+        params = params.query('tt != "lead"')
         # Load data
-        df = pd.read_csv(os.path.join(path_model, fn))
+        df = pd.read_csv(os.path.join(path_model, fn), usecols=cn_model)
         df[cn_dates] = df[cn_dates].apply(pd.to_datetime, 0)
         df = pd.concat([date2ymw(df.date_rt), df],1)
-        # Calculate aggregate performance
         df = df.merge(freq_woy,'inner')
         assert len(df) == len(dat_bl)
-        qq = df.drop(columns='month').merge(act_y,'inner',on=['date_rt'])
-        qq.query('y_rt_x!=y_rt_y').loc[361]
-        df.date_rt.describe()
-        act_y.date_rt.describe()
+        # Add on y's
+        df = df.merge(act_y,'inner',on='date_rt')
+        df = df.merge(pred_y,'inner','date_pred')
+        df = get_esc_levels(df,['pred'],esc_bins, esc_lbls)
+        df = df.assign(y_delta=lambda x: np.sign(x.esc_y - x.esc_y_rt),
+                        pred_delta = lambda x: np.sign(x.esc_pred - x.esc_y_rt) )
+        # Calculate spearman's correlation
+        perf_reg = df.groupby(cn_reg).apply(get_reg_score).reset_index()
+        perf_reg = perf_reg.melt(cn_reg,None,'metric').groupby(['lead','metric']).value.apply(get_iqr)
+        perf_reg = perf_reg.reset_index().pivot_table('value',['lead','metric'],'level_2').reset_index()
+        tmp_reg = pd.DataFrame(np.tile(params.val.values,[perf_reg.shape[0],1]),columns=params.tt)
+        perf_reg = pd.concat([perf_reg,tmp_reg],1)
+        # Calculate the precision/recall
+        perf_ord = prec_recall_lbls(x=df[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
+        perf_ord = perf_ord.query('pred_delta == 1').reset_index(None, True)
+        tmp_ord = pd.DataFrame(np.tile(params.val.values,[perf_ord.shape[0],1]),columns=params.tt)
+        perf_ord = pd.concat([perf_ord,tmp_ord],1)
+        # Save both
+        holder_reg.append(perf_reg)
+        holder_ord.append(perf_ord)
+# Merge 
+model_reg = pd.concat(holder_reg).reset_index(None,True)
+model_ord = pd.concat(holder_ord).reset_index(None,True)
+model_reg.lead = pd.Categorical(model_reg.lead)
+model_ord.lead = pd.Categorical(model_ord.lead)
+# Put on the same scale
+cn_iqr = ['mu','lb','ub']
+for cn in cn_iqr:
+    model_reg[cn] = np.where(model_reg.metric == 'MAE',-model_reg[cn], model_reg[cn])    
+    bl_reg[cn] = np.where(bl_reg.metric == 'MAE',-bl_reg[cn], bl_reg[cn])  
 
-        
+###################################
+# --- (3) COMPARE PERFORMANCE --- #
+
+best_reg = model_reg.sort_values(['lead','metric','mu'],ascending=False)
+best_reg['idx'] = best_reg.groupby(['lead','metric']).cumcount()
+best_reg = best_reg.query('idx==0').drop(columns='idx')
+best_reg = best_reg.sort_values(['metric','lead']).reset_index(None,True)
+best_reg.groupby(['dtrain','h_retrain','model_args']).size()
+
+best_ord = model_ord.sort_values(['lead','metric','value'],ascending=False)
+best_ord['idx'] = best_ord.groupby(['lead','metric']).cumcount()
+best_ord = best_ord.query('idx==0').drop(columns='idx')
+best_ord = best_ord.sort_values(['metric','lead']).reset_index(None,True)
+best_ord.groupby(['dtrain','h_retrain','model_args']).size()
+
+# Remove the worst outliers
+gg_reg = (ggplot(model_reg,aes(x='lead',y='mu')) + 
+    theme_bw() + 
+    geom_boxplot() + 
+    facet_wrap('~metric',scales='free_y') + 
+    labs(y='Regression metric',x='Lead') + 
+    theme(subplots_adjust={'wspace': 0.15}) + 
+    geom_point(aes(x='lead',y='mu'),color='red',data=bl_reg))
+gg_save('gg_reg.png',dir_figures,gg_reg,12,5)
+
+gg_ord = (ggplot(model_ord,aes(x='lead',y='value')) + 
+    theme_bw() + geom_boxplot() + 
+    facet_wrap('~metric') + 
+    labs(y='Precision/Recall',x='Lead') + 
+    theme(subplots_adjust={'wspace': 0.15}) + 
+    geom_point(color='red',data=bl_ord))
+gg_save('gg_ord.png',dir_figures,gg_ord,12,5)
 
 
-# # Calculate the change in escalation levels
-# cn_pr = ['date_rt','year','month','lead','y','y_rt','pred','se']
-# dat_pr = dat_recent[cn_pr].copy()
-# cn_date, cn_y, cn_y_rt, cn_pred, cn_se = 'date_rt', 'y', 'y_rt', 'pred', 'se'
-# dat_ord = ordinal_lbls(dat_pr, cn_date=cn_date, cn_y=cn_y, cn_y_rt=cn_y_rt, cn_pred=cn_pred, cn_se=cn_se, level=0.5)
-# # Double check it lines up with hand calculation
-# q1 = act_esc.query('lead==10').groupby(['year','month','esc']).size().reset_index()
-# q2 = dat_ord.query('lead==10').groupby(['year','month','y']).size().reset_index()
-# q3 = q1.rename(columns={0:'n1','esc':'y'}).merge(q2.rename(columns={0:'n2'}))
-# assert q3.query('n1 != n2').shape[0] == 0
+
+
 
 ######################################
 # --- (2) FACTORS OF PERFORMANCE --- #

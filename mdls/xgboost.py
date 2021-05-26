@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor as GBR
-from scipy.stats import spearmanr
+from xgboost import XGBRegressor as GBR
+from math import modf
 
+# di_model={'core_buffer':'2', 'eta':'0.1', 'depth':'3', 'loss':}
 # self=model(encoder=enc_yX, lead=lead, lag=lag, di_model=di_model)
 class model():
     def __init__(self, encoder, lead=24, lag=24, di_model=None):
@@ -13,11 +14,15 @@ class model():
         self.isfit = False
         self.rdrop = min(self.lead)
         # Set up with the defaults
-        self.di_model = {'n_trees':100, 'depth':3}
+        self.di_model = {'n_trees':100, 'depth':3, 'n_jobs':1, 'eta':0.3}
         if di_model is not None:
-            for k, v in di_model.items():
+            for k in di_model.keys():
                 assert k in self.di_model
-                self.di_model[k] = int(di_model[k])
+                val_k = float(di_model[k])
+                frac, _ = modf(val_k)
+                if frac == 0:
+                    val_k = int(val_k)
+                self.di_model[k] = val_k
 
     # self = regressor; X=Xtrain.copy(); y=ytrain.copy()
     def fit(self, X, y):
@@ -31,7 +36,9 @@ class model():
             idx_k = ~np.isnan(ytil)
             self.di_mdl[k] = GBR(random_state=k, 
                 n_estimators=self.di_model['n_trees'], 
-                max_depth=self.di_model['depth'])
+                max_depth=self.di_model['depth'],
+                n_jobs=self.di_model['n_jobs'],
+                learning_rate=self.di_model['eta'])
             self.di_mdl[k].fit(Xtil[idx_k],ytil[idx_k])
     
     # X = Xtrain[-25:].copy()

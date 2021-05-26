@@ -6,6 +6,17 @@ from funs_support import stopifnot
 from statsmodels.stats.proportion import proportion_confint as propCI
 import statsmodels.api as sm
 
+# Function to calculate escalation levels for different columns
+def get_esc_levels(x, cn, esc_bins, esc_lbls):
+    assert isinstance(x,pd.DataFrame)
+    if not isinstance(cn, pd.Series):
+        cn = pd.Series(cn)
+    cn2 = 'esc_' + cn
+    z = x[cn].apply(lambda w: pd.Categorical(pd.cut(w, esc_bins, False, esc_lbls)).codes,0)
+    z.rename(columns=dict(zip(cn,cn2)),inplace=True)
+    return pd.concat([x,z],axis=1)
+
+
 def ols(y, x, alpha=0.05):
     assert isinstance(x,np.ndarray) and isinstance(y,np.ndarray)
     mod = sm.OLS(y, x).fit()
@@ -60,16 +71,17 @@ def ordinal_lbls(df, cn_date, cn_y, cn_y_rt, cn_pred, cn_se, level=0.5):
 # ------------------------------------------------------------- #
 # --- Function to get precision/recall for different levels --- #
 # -------------------------------------------------------------- #
-def prec_recall_lbls(df, cn_y, cn_y_rt, cn_pred, cn_idx, gg_nmax=50):
-    # df=tmp.drop(columns=cn_drop);cn_y='y';cn_y_rt='y_rt';cn_pred='pred';cn_idx='date_rt';gg_nmax=50
+def prec_recall_lbls(x, cn_y, cn_pred, cn_idx, gg_nmax=53):
+    # x = df[['y_delta','pred_delta','date_rt','lead']].copy()
+    # cn_y='y_delta';cn_pred='pred_delta';cn_idx='date_rt';gg_nmax=100
     # del df, cn_y, cn_y_rt, cn_pred, cn_idx, gg_nmax, df_prec, df_sens, df_both, df_den
-    df = df.copy()
-    cn_check = [cn_y, cn_y_rt, cn_pred, cn_idx]
-    assert df.columns.isin(cn_check).sum() == len(cn_check)
-    cn_gg = list(np.setdiff1d(df.columns,cn_check))
+    x = x.copy()
+    cn_check = [cn_y, cn_pred, cn_idx]
+    assert x.columns.isin(cn_check).sum() == len(cn_check)
+    cn_gg = list(np.setdiff1d(x.columns,cn_check))
     # Double check no highly imbalanced group
-    assert np.all(df[cn_gg].apply(lambda x: np.unique(x).shape[0],0) < gg_nmax)
-    df_sens = df.pivot_table(cn_idx, cn_gg + [cn_pred], cn_y, 'count').fillna(0).astype(int)
+    assert np.all(x[cn_gg].apply(lambda x: np.unique(x).shape[0],0) <= gg_nmax)
+    df_sens = x.pivot_table(cn_idx, cn_gg + [cn_pred], cn_y, 'count').fillna(0).astype(int)
     df_sens = df_sens.reset_index().melt(cn_gg + [cn_pred], None, None, 'n')
     df_sens = df_sens.assign(is_tp=lambda x: np.where(x[cn_pred] == x[cn_y], 'tp', 'fp'))
     # Calculate the precision

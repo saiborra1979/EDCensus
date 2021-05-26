@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
-from xgboost import XGBRegressor as GBR
+from sklearn.ensemble import GradientBoostingRegressor as GBR
+from scipy.stats import spearmanr
 
-# di_model={'core_buffer':'2', 'eta':'0.1', 'depth':'3', 'loss':}
 # self=model(encoder=enc_yX, lead=lead, lag=lag, di_model=di_model)
 class model():
     def __init__(self, encoder, lead=24, lag=24, di_model=None):
