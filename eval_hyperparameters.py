@@ -4,8 +4,8 @@ SEARCHES THROUGH ~/test FOLDER TO FIND PERFORMANCE FOR DIFFERENT MODEL CONFIGS
 
 # Calls class from ~/mdls folder
 import argparse
-
 from numpy.lib.arraysetops import isin
+from sklearn import metrics
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_list', nargs='+', help='Model classes to evaluate (xgboost lasso)')
 args = parser.parse_args()
@@ -39,13 +39,11 @@ cn_ymd = ['year', 'month', 'day']
 cn_ymdh = cn_ymd + ['hour']
 cn_ymdl = cn_ymd + ['lead']
 
-di_desc = {'25%': 'lb', '50%': 'med', '75%': 'ub'}
-di_pr = {'prec': 'Precision', 'sens': 'Recall'}
-di_lblz = dict(zip(range(4),lblz))
-di_metric = {'tp':'TP', 'fp':'FP', 'fn':'FN', 'pos':'Positive'}
-
-colz_gg = ['black'] + gg_color_hue(3)
-lblz = ['≥0', '1', '2', '3']
+def drop_zero_var(df):
+    df = df.copy()
+    u_count = df.apply(lambda x: x.unique().shape[0],0)
+    df = df[u_count[u_count > 1].index]
+    return df
 
 ################################
 # --- (1) PREPARE BASELINE --- #
@@ -92,6 +90,9 @@ pred_y = act_y.rename(columns={'date_rt':'date_pred','y_rt':'y','esc_y_rt':'esc_
 cn_model = ['date_rt','date_pred','lead','pred']
 cn_reg = ['year','woy','lead']
 cn_ord = ['y_delta','pred_delta','date_rt','lead']
+cn_gg = ['lead','metric']
+cn_iqr = ['mu','lb','ub']
+di_swap = {'mu':'mu', 'lb':'ub', 'ub':'lb'}
 
 # (i) Baseline performance
 res_bl = dat_bl[cn_model+['year','woy']].copy()
@@ -101,9 +102,11 @@ res_bl = get_esc_levels(res_bl,['pred'],esc_bins, esc_lbls)
 res_bl = res_bl.assign(y_delta=lambda x: np.sign(x.esc_y - x.esc_y_rt),
                 pred_delta = lambda x: np.sign(x.esc_pred - x.esc_y_rt) )
 bl_reg = res_bl.groupby(cn_reg).apply(get_reg_score).reset_index()
-bl_reg = bl_reg.melt(cn_reg,None,'metric').groupby(['lead','metric']).value.apply(get_iqr)
-bl_reg = bl_reg.reset_index().pivot_table('value',['lead','metric'],'level_2').reset_index()
-bl_reg['model_name'] = 'bl'
+bl_reg = bl_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
+bl_reg = bl_reg.reset_index().rename(columns={'level_2':'iqr'})
+bl_reg = bl_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x.value),
+                       iqr=lambda x: np.where(x.metric == 'MAE',x.iqr.map(di_swap),x.iqr),
+                       model_name='bl')
 # classification
 bl_ord = prec_recall_lbls(x=res_bl[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
 bl_ord = bl_ord.query('pred_delta == 1').reset_index(None, True)
@@ -113,7 +116,8 @@ holder_reg, holder_ord = [], []
 for model in model_list:
     assert model in fn_test
     path_model = os.path.join(dir_test, model)
-    fn_model = os.listdir(path_model)
+    fn_model = pd.Series(os.listdir(path_model))
+    fn_model = fn_model[fn_model.str.contains('\\.csv')].reset_index(None,True)
     for i, fn in enumerate(fn_model):
         print('fn: %s (%i)' % (fn,i+1))
         params = fn.replace('.csv','').split('+')
@@ -134,10 +138,12 @@ for model in model_list:
                         pred_delta = lambda x: np.sign(x.esc_pred - x.esc_y_rt) )
         # Calculate spearman's correlation
         perf_reg = df.groupby(cn_reg).apply(get_reg_score).reset_index()
-        perf_reg = perf_reg.melt(cn_reg,None,'metric').groupby(['lead','metric']).value.apply(get_iqr)
-        perf_reg = perf_reg.reset_index().pivot_table('value',['lead','metric'],'level_2').reset_index()
+        perf_reg = perf_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
+        perf_reg = perf_reg.reset_index().rename(columns={'level_2':'iqr'})
         tmp_reg = pd.DataFrame(np.tile(params.val.values,[perf_reg.shape[0],1]),columns=params.tt)
         perf_reg = pd.concat([perf_reg,tmp_reg],1)
+        perf_reg = perf_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x.value),
+              iqr=lambda x: np.where(x.metric == 'MAE',x.iqr.map(di_swap),x.iqr))
         # Calculate the precision/recall
         perf_ord = prec_recall_lbls(x=df[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
         perf_ord = perf_ord.query('pred_delta == 1').reset_index(None, True)
@@ -146,120 +152,97 @@ for model in model_list:
         # Save both
         holder_reg.append(perf_reg)
         holder_ord.append(perf_ord)
-# Merge 
+# Merge
 model_reg = pd.concat(holder_reg).reset_index(None,True)
 model_ord = pd.concat(holder_ord).reset_index(None,True)
 model_reg.lead = pd.Categorical(model_reg.lead)
 model_ord.lead = pd.Categorical(model_ord.lead)
-# Put on the same scale
-cn_iqr = ['mu','lb','ub']
-for cn in cn_iqr:
-    model_reg[cn] = np.where(model_reg.metric == 'MAE',-model_reg[cn], model_reg[cn])    
-    bl_reg[cn] = np.where(bl_reg.metric == 'MAE',-bl_reg[cn], bl_reg[cn])  
+# Remove the number of jobs
+model_reg.model_args = model_reg.model_args.str.replace('\\_n\\_jobs\\-[0-9]{1,2}','')
+model_ord.model_args = model_ord.model_args.str.replace('\\_n\\_jobs\\-[0-9]{1,2}','')
+# Remove extraneuous columns
+model_reg = drop_zero_var(model_reg)
+model_ord = drop_zero_var(model_ord)
+
 
 ###################################
 # --- (3) COMPARE PERFORMANCE --- #
 
-best_reg = model_reg.sort_values(['lead','metric','mu'],ascending=False)
-best_reg['idx'] = best_reg.groupby(['lead','metric']).cumcount()
-best_reg = best_reg.query('idx==0').drop(columns='idx')
-best_reg = best_reg.sort_values(['metric','lead']).reset_index(None,True)
-best_reg.groupby(['dtrain','h_retrain','model_args']).size()
+cn_hp = ['dtrain','h_retrain']
+cn_gg_reg = cn_gg + ['iqr']
 
-best_ord = model_ord.sort_values(['lead','metric','value'],ascending=False)
-best_ord['idx'] = best_ord.groupby(['lead','metric']).cumcount()
-best_ord = best_ord.query('idx==0').drop(columns='idx')
+sort_reg = model_reg.sort_values(cn_gg_reg+['value'],ascending=False)
+sort_reg['idx'] = sort_reg.groupby(cn_gg_reg).cumcount() + 1
+sort_reg.reset_index(None,True,True)
+sort_reg[cn_hp] = sort_reg[cn_hp].apply(lambda x: pd.Categorical(x.astype(int)))
+best_reg = sort_reg.query('idx==1').drop(columns='idx')
+best_reg = best_reg.sort_values(cn_gg_reg).reset_index(None,True)
+
+sort_ord = model_ord.sort_values(cn_gg+['value'],ascending=False)
+sort_ord['idx'] = sort_ord.groupby(cn_gg).cumcount() + 1
+sort_ord.reset_index(None,True,True)
+sort_ord[cn_hp] = sort_ord[cn_hp].apply(lambda x: pd.Categorical(x.astype(int)))
+best_ord = sort_ord.query('idx==1').drop(columns='idx')
 best_ord = best_ord.sort_values(['metric','lead']).reset_index(None,True)
-best_ord.groupby(['dtrain','h_retrain','model_args']).size()
 
 # Remove the worst outliers
-gg_reg = (ggplot(model_reg,aes(x='lead',y='mu')) + 
-    theme_bw() + 
-    geom_boxplot() + 
-    facet_wrap('~metric',scales='free_y') + 
+gg_hpf_reg = (ggplot(model_reg,aes(x='lead',y='value')) + 
+    theme_bw() + geom_boxplot() + 
+    facet_grid('metric~iqr',scales='free_y') + 
     labs(y='Regression metric',x='Lead') + 
     theme(subplots_adjust={'wspace': 0.15}) + 
-    geom_point(aes(x='lead',y='mu'),color='red',data=bl_reg))
-gg_save('gg_reg.png',dir_figures,gg_reg,12,5)
+    geom_point(aes(x='lead',y='value'),color='red',data=bl_reg))
+gg_save('gg_hpf_reg.png', dir_figures, gg_hpf_reg, 8, 8)
 
-gg_ord = (ggplot(model_ord,aes(x='lead',y='value')) + 
+gg_hpf_ord = (ggplot(model_ord,aes(x='lead',y='value')) + 
     theme_bw() + geom_boxplot() + 
     facet_wrap('~metric') + 
     labs(y='Precision/Recall',x='Lead') + 
     theme(subplots_adjust={'wspace': 0.15}) + 
     geom_point(color='red',data=bl_ord))
-gg_save('gg_ord.png',dir_figures,gg_ord,12,5)
+gg_save('gg_hpf_ord.png', dir_figures, gg_hpf_ord, 12, 5)
 
+###################################
+# --- (4) SELECTION FREQUENCY --- #
 
-
-
-
-######################################
-# --- (2) FACTORS OF PERFORMANCE --- #
-
-
-
-
-di_msr = {'rho':"Spearman's rho",'MAE':"Mean Absolute error", 'MSE':"Mean Square Error"}
-
-cn_rho = ['date_rt','lead','year','woy','y','pred']
-dat_gp_bl = pd.concat([dat_recent[cn_rho].assign(tt='Model'),dat_bl[cn_rho].assign(tt='Baseline')]).reset_index(None,True)
-# --- (i) Spearman's rho + MAE --- #
-# (a) by lead
-cn_by_lead = ['tt','lead','year','woy']
-perf_lead = dat_gp_bl.groupby(cn_by_lead).apply(lambda x:  
-    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred), 'MSE':MSE(x.y,x.pred)}))
-perf_lead = perf_lead.reset_index().merge(lookup_woy)
-
-# (b) by day
-perf_day = dat_gp_bl.groupby(['tt','date_rt','year','woy']).apply(lambda x: 
-    pd.Series({'rho':spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred), 'MSE':MSE(x.y,x.pred)})).reset_index()
-perf_day = perf_day.merge(freq_woy,'inner',['year','woy'])
-perf_day_woy = perf_day.groupby(['tt','year','woy'])[list(di_msr)].mean().reset_index().merge(lookup_woy)
-
-# --- (ii) MAE --- #
-
-
-# # Time trend
-# perf_rho.assign(tidx=lambda x: x.groupby('lead').cumcount()+1).groupby('lead').apply(lambda x: ols(y=x.rho.values,x=x.tidx.values)).reset_index()
-# (ii) (a) Average level changes, (b) number of escalations, (c) number of esc jumps > 1
-
-
-#######################
-# --- (4) FIGURES --- #
-
-for msr in di_msr:
-    # Weekly
-    fn_weekly = 'gg_'+msr+'_weekly.png'
-    gg_weekly = (ggplot(perf_lead,aes(x='date_rt',y=msr,color='tt')) + 
-        theme_bw() + geom_line() + labs(y=di_msr[msr]) + 
-        scale_color_manual(name='Model',values=['black','red']) + 
+for metric in ['MAE','spearman']:
+    fn = 'gg_dayhour_grid_' + metric + '.png'
+    tmp = sort_reg.query('metric==@metric')
+    tmp = tmp.groupby(cn_gg+cn_hp).idx.mean().reset_index()
+    tmp2 = sort_reg.query('metric==@metric & idx <= 3')
+    gg_dayhour_grid = (ggplot(tmp, aes(x='dtrain',y='h_retrain',fill='idx')) + 
+        theme_bw() + geom_tile(color='black') + 
+        labs(x='Training days',y='Retraining (hours)') + 
         facet_wrap('~lead',labeller=label_both,nrow=4) + 
-        ggtitle('Calculated over week of year') + 
-        theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-        scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
-    gg_save(fn_weekly,dir_figures,gg_weekly,12,8)
+        scale_fill_continuous(name='Rank (1==best)') + 
+        ggtitle('MAE') + 
+        geom_text(aes(label='idx',color='iqr'),data=tmp2,size=8) + 
+        theme(axis_text_x=element_text(angle=90)) + 
+        scale_color_manual(name='IQR',labels=['25%','Mean','75%'],values=['white','grey','red']))
+    gg_save(fn, dir_figures, gg_dayhour_grid, 12, 7)
 
-    # Daily
-    fn_daily = 'gg_'+msr+'_daily.png'
-    gg_daily = (ggplot(perf_day_woy,aes(x='date_rt',y=msr,color='tt')) + 
-        theme_bw() + geom_line() + labs(y=di_msr[msr]) + 
-        scale_color_manual(name='Model',values=['black','red']) + 
-        ggtitle('Week of year average of hourly 24-hour prediction') + 
-        theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-        scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
-    gg_save(fn_daily,dir_figures,gg_daily,5,3.5)
+# Wrap on metric and h_retrain
+tmp = sort_reg.rename(columns={'h_retrain':'Retrain_Hours','metric':'Metric'}).copy()
+tmp = tmp.assign(lead2=lambda x: x.lead.astype(int)).query('lead2>=4')
+# tmp = tmp.assign(lead=lambda x: x.lead.astype(int))
+
+posd = position_dodge(0.5)
+gg_hp_dayhour = (ggplot(tmp,aes(x='dtrain',y='mu',color='lead')) + 
+    theme_bw() + geom_point(position=posd) + 
+    labs(x='Training days', y='MAE/Spearman')  + 
+    ggtitle('Retrain/Training set size (lead>=4)') + 
+    facet_grid('Metric~Retrain_Hours',scales='free_y',labeller=label_both))
+gg_save('gg_hp_dayhour.png', dir_figures, gg_hp_dayhour, 12, 6)
 
 
 
-gg_MAE_daily = (ggplot(perf_day_woy,aes(x='date_rt',y='MAE',color='tt')) + 
-    theme_bw() + geom_line() + 
-    scale_color_manual(name='Model',values=['black','red']) + 
-    labs(y="Mean Absolute Error") + 
-    ggtitle('Weekly average over 24-hour correlation') + 
-    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-    scale_x_datetime(date_breaks='2 months',date_labels='%b, %y'))
-gg_save('gg_MAE_daily.png',dir_figures,gg_MAE_daily,5,3.5)
+
+
+
+
+
+
+
 
 ################################
 # --- (3) PRECISION/RECALL --- #
