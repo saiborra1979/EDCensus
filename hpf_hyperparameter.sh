@@ -6,7 +6,7 @@ dir_err=/home/edrysdale/qsub
 # --- (1) XGBOOST --- #
 tree_seq="100"
 depth_seq="3"
-dtrain_seq="15 22 30 45 60 120"
+dtrain_seq="180 360 520"
 retrain_seq="24 48 72"
 
 i=0
@@ -18,8 +18,8 @@ for rtrain in $retrain_seq; do
 	echo "Iteration: "$i
 	perm="n_trees="$n_tree"_depth="$depth"_dtrain="$dtrain"_rtrain="$rtrain
 	echo $perm
-	# qsub -N xgboost_$perm -v n_tree=$n_tree,depth=$depth,dtrain=$dtrain,rtrain=$rtrain hpf_xgboost.sh
-	return
+	qsub -N xgboost_$perm -v n_tree=$n_tree,depth=$depth,dtrain=$dtrain,rtrain=$rtrain hpf_xgboost.sh
+#	return
 done
 done
 done

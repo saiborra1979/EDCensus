@@ -88,7 +88,7 @@ print('Training offset: %s' % offset_train)
 
 # All model classes a cn dictionary with ohe, cont, and bin
 #   this is passed into the funs_encode
-cn_cont = ['census_max','census_var','u_mds10h','tt_arrived','tt_discharged']
+cn_cont = ['census_max','census_var','tt_arrived','tt_discharged'] #'u_mds10h'
 di_cn = {'ohe':['hour','dow'], 'bin':None, 'cont':cn_cont}
 cn_all = list(df_X.columns)
 
