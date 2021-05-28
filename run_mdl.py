@@ -14,8 +14,8 @@ print(args)
 lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
-# # For debugging
-# dtrain=30; h_retrain=48; lag=24; lead=24; 
+# # # For debugging
+# dtrain=60; h_retrain=72; lag=24; lead=24; 
 # model_args='n_trees=200,depth=5,n_jobs=6'; model_name='xgboost'; ylbl='census_max'
 
 import os
@@ -44,7 +44,8 @@ model = getattr(getattr(model_class, model_name), 'model')
 # (iv) Load remaining packages/folders
 from time import time
 from datetime import datetime
-from funs_support import find_dir_olu, get_date_range, makeifnot
+from funs_support import find_dir_olu, get_date_range, makeifnot, get_reg_score, date2ymw, get_iqr
+from funs_stats import prec_recall_lbls, get_esc_levels
 from mdls.funs_encode import yX_process
 
 dir_base = os.getcwd()
@@ -54,6 +55,9 @@ dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 dir_model = os.path.join(dir_test, model_name)
 makeifnot(dir_model)
+for fold in ['scores','reg','ord']:
+    path = os.path.join(dir_model,fold)
+    makeifnot(path)
 
 #############################
 # --- STEP 1: LOAD DATA --- #
@@ -86,6 +90,9 @@ print('Training offset: %s' % offset_train)
 ########################################
 # --- STEP 3: TRAIN BASELINE MODEL --- #
 
+esc_bins = [-1000, 31, 38, 48, 1000]
+esc_lbls = ['≤30', '31-37', '38-47', '≥48']
+
 # All model classes a cn dictionary with ohe, cont, and bin
 #   this is passed into the funs_encode
 cn_cont = ['census_max','census_var','tt_arrived','tt_discharged'] #'u_mds10h'
@@ -116,13 +123,68 @@ for ii in range(nhours):
     tmp_res = pd.DataFrame(regressor.predict(X_now)).melt(None,None,'lead','pred')
     tmp_res = tmp_res.assign(lead=lambda x: x.lead+1,date_rt=time_ii)
     holder.append(tmp_res)
-
+# Merge and add labels
 df_res = pd.concat(holder).reset_index(None,True)
 df_res = df_res.assign(date_pred=lambda x: x.date_rt + x.lead*pd.offsets.Hour(1))    
 df_res = df_res.merge(pd.DataFrame({'date_rt':dates,'y_rt':yval}))
 df_res = df_res.merge(pd.DataFrame({'date_pred':dates,'y':yval}))
 df_res = df_res.sort_values(['date_rt','lead']).reset_index(None,True)
+df_res = pd.concat([date2ymw(df_res.date_rt), df_res],1).drop(columns='month')
+# Add on the escalation levels
+df_res = get_esc_levels(df_res,['y','y_rt','pred'],esc_bins, esc_lbls)
+df_res = df_res.assign(y_delta=lambda x: np.sign(x.esc_y - x.esc_y_rt),
+                pred_delta = lambda x: np.sign(x.esc_pred - x.esc_y_rt) )
 
+# Add on model args
+if di_model is not None:
+    fn_di = [k+'-'+v for k, v in di_model.items()]
+    fn_di = '_'.join(fn_di)
+else:
+    fn_di = 'None'
+fn_res = pd.DataFrame({'v1':['lead', 'lag', 'dtrain', 'h_retrain', 'ylbl', 'model_name','model_args'], 
+                       'v2':[lead, lag, dtrain, h_retrain, ylbl, model_name,fn_di]})
+fn_res.v2 = fn_res.v2.astype(str).str.replace('\\_n\\_jobs\\-[0-9]{1,2}','',regex=True)
+
+#########################################
+# --- STEP 4: GET MODEL PERFORMANCE --- #
+
+cn_reg = ['year','woy','lead']
+cn_gg = ['lead', 'metric']
+di_swap = {'med':'med', 'lb':'ub', 'ub':'lb'}
+cn_ord = ['y_delta','pred_delta','date_rt','lead']
+
+# (1) Calculate spearman and MAE
+perf_reg = df_res.groupby(cn_reg).apply(get_reg_score).reset_index()
+perf_reg = perf_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
+perf_reg = perf_reg.reset_index().rename(columns={'level_2':'iqr'})
+tmp_reg = pd.DataFrame(np.tile(fn_res.v2.values,[perf_reg.shape[0],1]),columns=fn_res.v1)
+perf_reg = pd.concat([perf_reg,tmp_reg],1)
+perf_reg = perf_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x.value),
+        iqr=lambda x: np.where(x.metric == 'MAE',x.iqr.map(di_swap),x.iqr))
+
+# (2) Calculate the precision/recall
+perf_ord = prec_recall_lbls(x=df_res[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
+perf_ord = perf_ord.query('pred_delta == 1').reset_index(None, True).drop(columns='pred_delta')
+tmp_ord = pd.DataFrame(np.tile(fn_res.v2.values,[perf_ord.shape[0],1]),columns=fn_res.v1)
+perf_ord = pd.concat([perf_ord,tmp_ord],1)
+
+# # (3) Do boostrap to get the standard errors
+# n_bs = 1000
+# for i in range(n_bs):
+#     if (i + 1) % 5 == 0:
+#         print(i+1)
+
+########################
+# --- STEP 5: SAVE --- #
+
+fn_write = fn_res.assign(v3=lambda x: x.v1 + '=' + x.v2.astype(str))
+fn_write = fn_write.v3.str.cat(sep='+')+'.csv'
+di_res = {'scores':df_res, 'reg':perf_reg, 'ord':perf_ord}
+
+# Save predictions for later
+for fold in di_res:
+    path = os.path.join(dir_model, fold, fn_write)
+    di_res[fold].to_csv(path, index=False)
 
 # from plotnine import *
 # dir_figures = os.path.join(dir_olu, 'figures', 'census')
@@ -137,19 +199,3 @@ df_res = df_res.sort_values(['date_rt','lead']).reset_index(None,True)
 #     geom_point(aes(x='date_rt',y='y_rt'),color='black',alpha=0.5) + 
 #     guides(color=False))
 # gg_save('gg_tmp.png', dir_figures, gg_tmp, 14, 4.5)
-
-####################################
-# --- STEP 3: SAVE PREDICTIONS --- #
-
-# Add on model args
-if di_model is not None:
-    fn_di = [k+'-'+v for k, v in di_model.items()]
-    fn_di = '_'.join(fn_di)
-else:
-    fn_di = 'None'
-fn_res = pd.DataFrame({'v1':['lead', 'lag', 'dtrain', 'h_retrain', 'ylbl', 'model_name','model_args'], 
-                       'v2':[lead, lag, dtrain, h_retrain, ylbl, model_name,fn_di]})
-fn_res = fn_res.assign(v3=lambda x: x.v1 + '=' + x.v2.astype(str))
-fn_res = fn_res.v3.str.cat(sep='+')+'.csv'
-# Save predictions for later
-df_res.to_csv(os.path.join(dir_model, fn_res), index=False)

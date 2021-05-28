@@ -1,10 +1,26 @@
-import sys
 import numpy as np
 import pandas as pd
 from scipy import stats
-from funs_support import stopifnot
 from statsmodels.stats.proportion import proportion_confint as propCI
 import statsmodels.api as sm
+from funs_support import stopifnot
+
+
+def ttest_vec(mu1, mu2, se1, se2, n1, n2, var_eq=False):
+    var1, var2 = se1**2, se2**2
+    num = mu1 - mu2
+    if var_eq:
+        nu = n1 + n2 - 2
+        sp2 = ((n1-1)*var1 + (n2-1)*var2) / nu
+        den = np.sqrt(sp2*(1/n1 + 1/n2))
+    else:
+        nu = (var1/n1 + var2/n2)**2 / ( (var1/n1)**2/(n1-1) + (var2/n2)**2/(n2-1) )
+        den = np.sqrt(var1/n1 + var2/n2)
+    dist_null = stats.t(df=nu)
+    tstat = num / den
+    pvals = 2*np.minimum(dist_null.sf(tstat), dist_null.cdf(tstat))
+    return tstat, pvals
+
 
 # Function to calculate escalation levels for different columns
 def get_esc_levels(x, cn, esc_bins, esc_lbls):

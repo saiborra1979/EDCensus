@@ -184,7 +184,8 @@ def date2ymdh(x):
 
 def date2ymw(x,week53=True):
     assert isinstance(x, pd.Series)
-    dat = pd.DataFrame({'year': x.dt.year, 'month':x.dt.month,'woy':x.dt.weekofyear})
+    dat = x.dt.isocalendar().drop(columns='day').rename(columns={'week':'woy'})
+    dat.insert(1,'month',x.dt.month)
     if week53:  # Will ensure week 53 is not split over two years
         dat = dat.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
     return dat
