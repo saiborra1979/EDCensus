@@ -2,16 +2,16 @@
 SEARCHES THROUGH ~/test FOLDER TO FIND PERFORMANCE FOR DIFFERENT MODEL CONFIGS
 """
 
-# Calls class from ~/mdls folder
-import argparse
-from numpy.lib.arraysetops import isin
-from sklearn import metrics
-parser = argparse.ArgumentParser()
-parser.add_argument('--model_list', nargs='+', help='Model classes to evaluate (xgboost lasso)')
-args = parser.parse_args()
-model_list = args.model_list
-print(model_list)
-assert isinstance(model_list, list)
+# # Calls class from ~/mdls folder
+# import argparse
+# from numpy.lib.arraysetops import isin
+# from sklearn import metrics
+# parser = argparse.ArgumentParser()
+# parser.add_argument('--model_list', nargs='+', help='Model classes to evaluate (xgboost lasso)')
+# args = parser.parse_args()
+# model_list = args.model_list
+# print(model_list)
+# assert isinstance(model_list, list)
 
 # For debugging
 model_list = ['xgboost']
@@ -20,9 +20,6 @@ import os
 import pandas as pd
 import numpy as np
 from plotnine import *
-from scipy.stats import spearmanr
-from sklearn.metrics import mean_absolute_error as MAE
-from sklearn.metrics import mean_squared_error as MSE
 from funs_support import date2ymw, find_dir_olu, get_reg_score, get_iqr, gg_save #gg_color_hue
 from funs_stats import get_esc_levels, add_bin_CI, prec_recall_lbls
 
@@ -164,6 +161,23 @@ model_ord.model_args = model_ord.model_args.str.replace('\\_n\\_jobs\\-[0-9]{1,2
 model_reg = drop_zero_var(model_reg)
 model_ord = drop_zero_var(model_ord)
 
+# Do inference via the boostrap
+tmp_aerr = df.assign(aerr=lambda x: np.abs(x.y-x.pred))[cn_reg+['aerr']]
+tmp_aerr['idx'] = tmp_aerr.groupby(cn_reg).cumcount()
+tmp_aerr = tmp_aerr.pivot_table('aerr',cn_reg[:-1]+['idx'],'lead').droplevel(2)
+
+n_bs = 50
+tmp_aerr_bs = tmp_aerr.sample(frac=n_bs,replace=True,random_state=n_bs)
+tmp_aerr_bs.insert(0,'idx',np.repeat(range(n_bs),tmp_aerr.shape[0]))
+tmp_aerr_bs = tmp_aerr_bs.set_index('idx',append=True)
+# Average over the rows within the idx/year/woy
+tmp_aerr_bs = tmp_aerr_bs.groupby(cn_reg[:-1]+['idx']).mean()
+tmp_aerr_bs = tmp_aerr_bs.reset_index().melt(cn_reg[:-1]+['idx'])
+tmp_aerr_bs.groupby(['idx']).value.quantile([0.25,0.5,0.75])
+
+
+tmp_aerr.groupby(cn_reg[:-1]).mean().median()
+perf_reg.query('metric=="MAE" & iqr=="mu"')
 
 ###################################
 # --- (3) COMPARE PERFORMANCE --- #
@@ -190,6 +204,7 @@ gg_hpf_reg = (ggplot(model_reg,aes(x='lead',y='value')) +
     theme_bw() + geom_boxplot() + 
     facet_grid('metric~iqr',scales='free_y') + 
     labs(y='Regression metric',x='Lead') + 
+    ggtitle('Red dot shows baseline model (hour of day)') + 
     theme(subplots_adjust={'wspace': 0.15}) + 
     geom_point(aes(x='lead',y='value'),color='red',data=bl_reg))
 gg_save('gg_hpf_reg.png', dir_figures, gg_hpf_reg, 8, 8)
@@ -197,6 +212,8 @@ gg_save('gg_hpf_reg.png', dir_figures, gg_hpf_reg, 8, 8)
 gg_hpf_ord = (ggplot(model_ord,aes(x='lead',y='value')) + 
     theme_bw() + geom_boxplot() + 
     facet_wrap('~metric') + 
+    ggtitle('Red dot shows baseline model (hour of day)') + 
+    scale_y_continuous(limits=[0,1]) + 
     labs(y='Precision/Recall',x='Lead') + 
     theme(subplots_adjust={'wspace': 0.15}) + 
     geom_point(color='red',data=bl_ord))
@@ -220,6 +237,10 @@ for metric in ['MAE','spearman']:
         theme(axis_text_x=element_text(angle=90)) + 
         scale_color_manual(name='IQR',labels=['25%','Mean','75%'],values=['white','grey','red']))
     gg_save(fn, dir_figures, gg_dayhour_grid, 12, 7)
+    # Get the bootstrap distribution
+    tmp
+
+
 
 # Wrap on metric and h_retrain
 tmp = sort_reg.rename(columns={'h_retrain':'Retrain_Hours','metric':'Metric'}).copy()

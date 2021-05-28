@@ -18,8 +18,8 @@ for rtrain in $retrain_seq; do
 	echo "Iteration: "$i
 	perm="n_trees="$n_tree"_depth="$depth"_dtrain="$dtrain"_rtrain="$rtrain
 	echo $perm
-	qsub -N xgboost_$perm -v n_tree=$n_tree,depth=$depth,dtrain=$dtrain,rtrain=$rtrain hpf_xgboost.sh
-#	return
+	model_args=n_trees=$n_tree,depth=$depth,n_jobs=11
+	qsub -N xgboost_$perm -v model_name="xgboost",model_args=$model_args hpf_model.sh
 done
 done
 done

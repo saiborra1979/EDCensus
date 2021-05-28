@@ -15,8 +15,8 @@ fold_env="/hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate"
 which python
 
 # Run python script
-python -u run_mdl.py --model_name xgboost  --ylbl census_max --lead 24 --lag 24 \
-    --model_args n_trees=$n_tree,depth=$depth,n_jobs=1 \
+python -u run_mdl.py --model_name $model_name  --model_args $model_args \ 
+    --ylbl census_max --lead 24 --lag 24 \
     --dtrain $dtrain --h_retrain $rtrain
 
 echo "End of hpf_xgboost.sh"

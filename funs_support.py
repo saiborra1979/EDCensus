@@ -25,7 +25,8 @@ def get_reg_score(x):
     return tmp
 
 def get_iqr(x,alpha=0.25):
-    tmp = pd.Series({'mu':x.median(), 'lb':x.quantile(alpha),'ub':x.quantile(1-alpha)})
+    tmp = x.quantile([1-alpha,0.5,alpha])
+    tmp.index = ['lb','med','ub']
     return tmp
 
 
