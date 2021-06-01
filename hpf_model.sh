@@ -7,17 +7,23 @@
 #PBS -l mem=16g
 #PBS -l nodes=1:ppn=12
 
-# Script to run the XGBoost model
+# Modify the model_args command
+echo "model args="$model_args
+model_args=$(echo $model_args | sed -r "s/\\-/,/g")
+
+echo "model args="$model_args
+echo "model_name="$model_name
+echo "dtrain="$dtrain
+echo "rtrain="$rtrain
+
 cd /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/CensusFlow || return
 module load python/3.8.1
-fold_env="/hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate"
-. $fold_env
+source /hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate
 which python
 
+
 # Run python script
-python -u run_mdl.py --model_name $model_name  --model_args $model_args \ 
-    --ylbl census_max --lead 24 --lag 24 \
-    --dtrain $dtrain --h_retrain $rtrain
+python -u run_mdl.py --model_name $model_name --model_args $model_args --ylbl census_max --lead 24 --lag 24 --dtrain $dtrain --h_retrain $rtrain
 
 echo "End of hpf_xgboost.sh"
 
