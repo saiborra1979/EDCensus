@@ -14,9 +14,9 @@ print(args)
 lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
-# # # For debugging
-# dtrain=60; h_retrain=72; lag=24; lead=24; 
-# model_args='n_trees=200,depth=5,n_jobs=6'; model_name='xgboost'; ylbl='census_max'
+# # For debugging
+# dtrain=60; h_retrain=int(24*30); lag=24; lead=24; 
+# model_args='n_trees=100,depth=3,n_jobs=6'; model_name='xgboost'; ylbl='census_max'
 
 import os
 import numpy as np
@@ -158,6 +158,7 @@ perf_reg = df_res.groupby(cn_reg).apply(get_reg_score).reset_index()
 perf_reg = perf_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
 perf_reg = perf_reg.reset_index().rename(columns={'level_2':'iqr'})
 tmp_reg = pd.DataFrame(np.tile(fn_res.v2.values,[perf_reg.shape[0],1]),columns=fn_res.v1)
+tmp_reg.drop(columns='lead',inplace=True)
 perf_reg = pd.concat([perf_reg,tmp_reg],1)
 perf_reg = perf_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x.value),
         iqr=lambda x: np.where(x.metric == 'MAE',x.iqr.map(di_swap),x.iqr))
@@ -166,13 +167,40 @@ perf_reg = perf_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x
 perf_ord = prec_recall_lbls(x=df_res[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
 perf_ord = perf_ord.query('pred_delta == 1').reset_index(None, True).drop(columns='pred_delta')
 tmp_ord = pd.DataFrame(np.tile(fn_res.v2.values,[perf_ord.shape[0],1]),columns=fn_res.v1)
+tmp_ord.drop(columns='lead',inplace=True)
 perf_ord = pd.concat([perf_ord,tmp_ord],1)
 
-# # (3) Do boostrap to get the standard errors
-# n_bs = 1000
-# for i in range(n_bs):
-#     if (i + 1) % 5 == 0:
-#         print(i+1)
+# (3) Do boostrap to get the standard errors
+holder_reg, holder_ord = [], []
+n_bs = 1000
+for i in range(n_bs):
+    if (i + 1) % 5 == 0:
+        print(i+1)
+    bs_res = df_res.sample(frac=1,replace=True,random_state=i).reset_index(None,True)
+    # Regression
+    bs_reg = bs_res.groupby(cn_reg).apply(get_reg_score).reset_index()
+    bs_reg = bs_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
+    bs_reg = bs_reg.reset_index().rename(columns={'level_2':'iqr'})
+    bs_reg = bs_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x.value),
+            iqr=lambda x: np.where(x.metric == 'MAE',x.iqr.map(di_swap),x.iqr))
+    # Classification
+    bs_ord = prec_recall_lbls(x=bs_res[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
+    bs_ord = bs_ord.query('pred_delta == 1').reset_index(None, True).drop(columns='pred_delta')
+    # Save
+    holder_reg.append(bs_reg.assign(sim=i))
+    holder_ord.append(bs_ord.assign(sim=i))
+# Calculate standard error and 95% CI
+gg_reg = ['metric','iqr','lead']
+bs_reg = pd.concat(holder_reg).groupby(gg_reg).value.apply(lambda x: 
+    pd.DataFrame({'se':x.std(ddof=1),'CI_lb':x.quantile(0.025),'CI_ub':x.quantile(0.975)},index=[0]))
+bs_reg = bs_reg.reset_index().drop(columns='level_3')
+gg_ord = ['metric','lead']
+bs_ord = pd.concat(holder_ord).groupby(gg_ord).value.apply(lambda x: 
+    pd.DataFrame({'se':x.std(ddof=1),'CI_lb':x.quantile(0.025),'CI_ub':x.quantile(0.975)},index=[0]))
+bs_ord = bs_ord.reset_index().drop(columns='level_2')
+# Merge with existing
+perf_reg = perf_reg.merge(bs_reg,'left',gg_reg)
+perf_ord = perf_ord.merge(bs_ord,'left',gg_ord)
 
 ########################
 # --- STEP 5: SAVE --- #
