@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# example of use: source transfer_csv.sh sep 2020
+# example of use: source pipeline_pulls.sh sep 2020
 
 loc=$(pwd | cut -d'/' -f3)
 
@@ -16,8 +16,8 @@ fi
 if [ "$loc" == "c" ]; then
  echo "We are on predator"
  dir_pulls="/mnt/d/projects/ED/pulls"
- dir_hpf="edrysdale@data.ccm.sickkids.ca:/hpf/largeprojects/agoldenb/edrysdale/ED/pulls"
- dir_snow="erik@snowqueen.sickkids.ca:/home/erik/Documents/projects/ED/master/pulls"
+ dir_hpf="edrysdale@data.ccm.sickkids.ca:/hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/pulls"
+ dir_snow="erik@snowqueen.sickkids.ca:/data/ED/pulls"
  # the most recent month
  month=${1}
  year=${2}
@@ -40,7 +40,7 @@ fi
 
 if [ "$loc" == "erik" ]; then
  echo "We are on snowqueen"
- dir_pulls=/home/erik/Documents/projects/ED/master/pulls
+ dir_pulls=/data/ED/pulls
  mv $dir_pulls/labs*.csv $dir_pulls/labs
  mv $dir_pulls/DI*.csv $dir_pulls/DI
  mv $dir_pulls/clin*.csv $dir_pulls/triage_clin
