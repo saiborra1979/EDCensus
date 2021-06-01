@@ -173,9 +173,14 @@ perf_ord = pd.concat([perf_ord,tmp_ord],1)
 # (3) Do boostrap to get the standard errors
 holder_reg, holder_ord = [], []
 n_bs = 1000
+stime = time()
 for i in range(n_bs):
     if (i + 1) % 5 == 0:
         print(i+1)
+        dtime, nleft = time() - stime, n_bs-(i+1)
+        rate = (i+i)/dtime
+        seta = nleft / rate
+        print('bootstrap ETA: %i seconds (%i left)' % (seta, nleft))
     bs_res = df_res.sample(frac=1,replace=True,random_state=i).reset_index(None,True)
     # Regression
     bs_reg = bs_res.groupby(cn_reg).apply(get_reg_score).reset_index()
