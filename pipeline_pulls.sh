@@ -6,7 +6,7 @@ loc=$(pwd | cut -d'/' -f3)
 
 if [ "$loc" == "largeprojects" ]; then
  echo "We are on HPF"
- dir_pulls=/hpf/largeprojects/agoldenb/edrysdale/ED/pulls
+ dir_pulls=/hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/pulls
  mv $dir_pulls/labs*.csv $dir_pulls/labs
  mv $dir_pulls/DI*.csv $dir_pulls/DI
  mv $dir_pulls/clin*.csv $dir_pulls/triage_clin
