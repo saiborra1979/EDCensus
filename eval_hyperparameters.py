@@ -90,9 +90,9 @@ cn_model = ['date_rt','date_pred','lead','pred']
 cn_reg = ['year','woy','lead']
 cn_ord = ['y_delta','pred_delta','date_rt','lead']
 cn_gg = ['lead','metric']
-cn_iqr = ['med','lb','ub']
-di_iqr = dict(zip(cn_iqr,['Median','Q25','Q75']))
-di_swap = {'med':'med', 'lb':'ub', 'ub':'lb'}
+cn_iqr = ['lb','med','ub']
+di_iqr = dict(zip(cn_iqr,['Q25','Median','Q75']))
+di_swap = {'lb':'ub', 'med':'med', 'ub':'lb'}
 cn_hp = ['dtrain','h_retrain']
 cn_gg_reg = cn_gg + ['iqr']
 
@@ -115,70 +115,26 @@ bl_ord = prec_recall_lbls(x=res_bl[cn_ord],cn_y='y_delta',cn_pred='pred_delta',c
 bl_ord = bl_ord.query('pred_delta == 1').reset_index(None, True)
 
 # (ii) Load in the different model classes
-n_bs = 250
-holder_reg, holder_ord, holder_bs = [], [], []
+holder_reg, holder_ord = [], []
 for model in model_list:
+    print('Model: %s' % model)
     assert model in fn_test
     path_model = os.path.join(dir_test, model)
-    fn_model = pd.Series(os.listdir(path_model))
+    path_model_ord = os.path.join(path_model, 'ord')
+    path_model_reg = os.path.join(path_model, 'reg')
+    assert os.path.exists(path_model_ord) & os.path.exists(path_model_reg)
+    fn_model_ord = pd.Series(os.listdir(path_model_ord))
+    fn_model_reg = pd.Series(os.listdir(path_model_reg))
+    # Find the overlapp
+    fn_model = pd.Series(np.intersect1d(fn_model_reg, fn_model_ord))
     fn_model = fn_model[fn_model.str.contains('\\.csv')].reset_index(None,True)
     for i, fn in enumerate(fn_model):
-        stime = time()
-        print('fn: %s (%i)' % (fn,i+1))
-        params = fn.replace('.csv','').split('+')
-        params = pd.DataFrame([param.split('=') for param in params])
-        params.rename(columns={0:'tt',1:'val'},inplace=True)
-        params = params.query('tt != "lead"')
-        # Remove the number of jobs
-        params.val = params.val.str.replace('\\_n\\_jobs\\-[0-9]{1,2}','',regex=True)
-        # Load data
-        df = pd.read_csv(os.path.join(path_model, fn), usecols=cn_model)
-        df[cn_dates] = df[cn_dates].apply(pd.to_datetime, 0)
-        df = pd.concat([date2ymw(df.date_rt), df],1)
-        df = df.merge(freq_woy,'inner')
-        assert len(df) == len(dat_bl)
-        # Add on y's
-        df = df.merge(act_y,'inner',on='date_rt')
-        df = df.merge(pred_y,'inner','date_pred')
-        df = get_esc_levels(df,['pred'],esc_bins, esc_lbls)
-        df = df.assign(y_delta=lambda x: np.sign(x.esc_y - x.esc_y_rt),
-                        pred_delta = lambda x: np.sign(x.esc_pred - x.esc_y_rt) )
-        # Calculate spearman's correlation
-        perf_reg = df.groupby(cn_reg).apply(get_reg_score).reset_index()
-        perf_reg = perf_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
-        perf_reg = perf_reg.reset_index().rename(columns={'level_2':'iqr'})
-        tmp_reg = pd.DataFrame(np.tile(params.val.values,[perf_reg.shape[0],1]),columns=params.tt)
-        perf_reg = pd.concat([perf_reg,tmp_reg],1)
-        perf_reg = perf_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x.value),
-              iqr=lambda x: np.where(x.metric == 'MAE',x.iqr.map(di_swap),x.iqr))
-        # Calculate the precision/recall
-        perf_ord = prec_recall_lbls(x=df[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
-        perf_ord = perf_ord.query('pred_delta == 1').reset_index(None, True)
-        tmp_ord = pd.DataFrame(np.tile(params.val.values,[perf_ord.shape[0],1]),columns=params.tt)
-        perf_ord = pd.concat([perf_ord,tmp_ord],1)
-        # Do inference via the boostrap
-        tmp_aerr = df.assign(aerr=lambda x: np.abs(x.y-x.pred))[cn_reg+['aerr']]
-        tmp_aerr['idx'] = tmp_aerr.groupby(cn_reg).cumcount()
-        tmp_aerr = tmp_aerr.pivot_table('aerr',cn_reg[:-1]+['idx'],'lead').droplevel(2)
-        tmp_aerr_bs = tmp_aerr.sample(frac=n_bs,replace=True,random_state=n_bs)
-        tmp_aerr_bs.insert(0,'idx',np.repeat(range(n_bs),tmp_aerr.shape[0]))
-        tmp_aerr_bs = tmp_aerr_bs.set_index('idx',append=True)
-        # Average over the rows within the idx/year/woy
-        tmp_aerr_bs = tmp_aerr_bs.groupby(cn_reg[:-1]+['idx']).mean()
-        tmp_aerr_bs = tmp_aerr_bs.reset_index().melt(cn_reg[:-1]+['idx'])
-        tmp_aerr_bs = tmp_aerr_bs.groupby(['lead','idx']).value.apply(get_iqr).reset_index()
-        tmp_aerr_bs = tmp_aerr_bs.rename(columns={'level_2':'iqr'})
-        tmp_aerr_bs = tmp_aerr_bs.groupby(['lead','iqr']).value.std(ddof=1).reset_index()
-        tmp_aerr_bs = tmp_aerr_bs.rename(columns={'value':'se'}).assign(metric='MAE')
-        tmp_aerr_bs = tmp_aerr_bs.merge(perf_reg,'inner',['lead','iqr','metric'])
-        # Save all
-        holder_reg.append(perf_reg)
+        fn_ord = os.path.join(path_model_ord, fn)
+        fn_reg = os.path.join(path_model_reg, fn)
+        perf_ord = pd.read_csv(fn_ord)
+        perf_reg = pd.read_csv(fn_reg)
         holder_ord.append(perf_ord)
-        holder_bs.append(tmp_aerr_bs)
-        # Run time
-        dtime, nleft = time() - stime, len(fn_model)-(i+1)
-        seta = nleft*dtime
-        print('ETA: %0.1f seconds' % seta)
+        holder_reg.append(perf_reg)
 # MAE
 model_reg = pd.concat(holder_reg).reset_index(None,True)
 model_reg.lead = pd.Categorical(model_reg.lead)
@@ -187,13 +143,9 @@ model_reg = drop_zero_var(model_reg)
 model_ord = pd.concat(holder_ord).reset_index(None,True)
 model_ord.lead = pd.Categorical(model_ord.lead)
 model_ord = drop_zero_var(model_ord)
-# Bootstrap
-model_bs = pd.concat(holder_bs).reset_index(None,True)
-model_bs = drop_zero_var(model_bs)
-model_bs[cn_hp] = model_bs[cn_hp].astype(int).apply(pd.Categorical)
 
-###################################
-# --- (3) COMPARE PERFORMANCE --- #
+#####################################
+# --- (3) ALL MODEL PERFORMANCE --- #
 
 sort_reg = model_reg.sort_values(cn_gg_reg+['value'],ascending=False)
 sort_reg['idx'] = sort_reg.groupby(cn_gg_reg).cumcount() + 1
@@ -229,59 +181,122 @@ gg_hpf_ord = (ggplot(model_ord,aes(x='lead',y='value')) +
     geom_point(color='red',data=bl_ord))
 gg_save('gg_hpf_ord.png', dir_figures, gg_hpf_ord, 12, 5)
 
-###################################
-# --- (4) SELECTION FREQUENCY --- #
+##############################################
+# --- (4) VARIATION ACROSS DTRAIN/RTRAIN --- #
 
-for metric in ['MAE','spearman']:
-    fn = 'gg_dayhour_grid_' + metric + '.png'
-    tmp = sort_reg.query('metric==@metric')
-    tmp = tmp.groupby(cn_gg+cn_hp).idx.mean().reset_index()
-    tmp2 = sort_reg.query('metric==@metric & idx <= 3')
-    gg_dayhour_grid = (ggplot(tmp, aes(x='dtrain',y='h_retrain',fill='idx')) + 
-        theme_bw() + geom_tile(color='black') + 
-        labs(x='Training days',y='Retraining (hours)') + 
-        facet_wrap('~lead',labeller=label_both,nrow=4) + 
-        scale_fill_continuous(name='Rank (1==best)') + 
-        ggtitle('MAE') + 
-        geom_text(aes(label='idx',color='iqr'),data=tmp2,size=8) + 
-        theme(axis_text_x=element_text(angle=90)) + 
-        scale_color_manual(name='IQR',labels=['25%','Mean','75%'],values=['white','grey','red']))
-    gg_save(fn, dir_figures, gg_dayhour_grid, 12, 7)
-    
-# Compare to bootstrap distribution
-tmp = model_bs.assign(metric='MAE',lead=lambda x: pd.Categorical(x.lead)).drop(columns='value')
-tmp[cn_hp] = tmp[cn_hp].astype(int).apply(pd.Categorical)
-tmp = tmp.merge(best_reg,'inner').rename(columns={'value':'value_best','se':'se_best'})
-tmp = tmp[['lead','iqr','value_best','se_best']]
-z_bs = model_bs.merge(tmp,'left').sort_values(['iqr','lead','dtrain']).reset_index(None,True)
-# Calculate whether means are 1-sd apart
-z_bs = z_bs.assign(z=lambda x: (x.value-x.value_best)/np.sqrt((x.se**2+x.se_best**2)/2))
-z_bs = z_bs.assign(pv = lambda x: 2*stats.norm.cdf(-x.z.abs()))
-z_bs = z_bs.assign(is_sig = lambda x: x.pv < 0.05)
-# Find the smallest dtrain
-z_dtrain = z_bs.groupby(['lead','iqr','is_sig']).apply(lambda x: x.dtrain.astype(int).min())
-z_dtrain = z_dtrain.reset_index().rename(columns={0:'dtrain'}).query('is_sig==False').drop(columns='is_sig')
+cn_metric = ['MAE','spearman']
 
-posd = position_dodge(0.5)
-tmp_gg = z_bs.query('iqr == "med" & lead>=5').reset_index(None,True)
-gg_bs_MAE = (ggplot(tmp_gg,aes(x='dtrain',y='value',color='h_retrain',alpha='is_sig')) + 
-    theme_bw() + geom_point(position=posd) + 
-    scale_color_discrete(name='Hours2Retrain') + 
-    facet_wrap('~lead',scales='free_y',labeller=label_both,ncol=5) + 
-    labs(y='(Negative) Mean Absolute Error',x='# of training days') + 
-    theme(subplots_adjust={'wspace': 0.20}) + 
-    scale_alpha_manual(name='>2 sd',values=[1,0.3]) + 
-    geom_linerange(aes(ymin='value-2*se',ymax='value+2*se'),position=posd))
-gg_save('gg_bs_MAE.png', dir_figures, gg_bs_MAE, 18, 12)
+n_dtrain_htrain = model_reg.groupby(['dtrain','h_retrain']).size().reset_index().rename(columns={0:'n'})
+retrain_star = n_dtrain_htrain.h_retrain.value_counts().reset_index().query('h_retrain>1')
+retrain_star = retrain_star['index'].max()
+print('Sup retraining hours with > 1 obs: %s' % retrain_star)
 
-# Plot it!
-gg_dtrain_inf = (ggplot(z_dtrain,aes(x='lead',y='dtrain',color='iqr')) + 
-    theme_bw() + geom_line() + geom_point() + 
-    scale_color_discrete(name='IQR',labels=['Q25','Median','Q75']) + 
-    labs(x='Forecasting lead',y='infimum training days within 2sd') + 
-    scale_x_continuous(breaks=list(np.arange(1,24,2))) + 
-    scale_y_continuous(breaks=list(np.sort(z_dtrain.dtrain.unique()))))
-gg_save('gg_dtrain_inf.png', dir_figures, gg_dtrain_inf, 6, 4)
+# (i) Number of training days
+tmp1 = sort_reg[sort_reg.h_retrain == retrain_star].reset_index(None,True)
+tmp2 = sort_ord[sort_ord.h_retrain == retrain_star].reset_index(None,True).assign(iqr='med')
+cn_isec = np.intersect1d(tmp1.columns, tmp2.columns)
+res_dtrain = pd.concat([tmp1[cn_isec],tmp2[cn_isec]]).reset_index(None,True)
+res_dtrain = drop_zero_var(res_dtrain).rename(columns={'dtrain':'train'}).assign(tt='dtrain')
+
+# (ii) Number of retraining days
+dtrain_star = n_dtrain_htrain.dtrain.value_counts().reset_index()
+dtrain_star = dtrain_star.sort_values('dtrain',ascending=False).iloc[0]['index']
+
+# Number of training days
+tmp1 = sort_reg[sort_reg.dtrain == dtrain_star].reset_index(None,True)
+tmp2 = sort_ord[sort_ord.dtrain == dtrain_star].reset_index(None,True).assign(iqr='med')
+cn_isec = np.intersect1d(tmp1.columns, tmp2.columns)
+res_rtrain = pd.concat([tmp1[cn_isec],tmp2[cn_isec]]).reset_index(None,True)
+res_rtrain = drop_zero_var(res_rtrain).rename(columns={'h_retrain':'train'}).assign(tt='rtrain')
+# Put retraining frequency to days
+res_rtrain.train = (res_rtrain.train.astype(float)/24).astype(int)
+
+# (iii) Merge
+res_train = pd.concat([res_dtrain,res_rtrain]).reset_index(None,True)
+
+# (iv) Loop over training types and measures
+cn_keep = ['lead','iqr','value','se','train']
+cn_bounds = ['value','ub','lb']
+cn_li = ['lead','iqr']
+
+holder = []
+for tt in res_train.tt.unique():
+    print('tt: %s' % tt)
+    tmp1 = res_train.query('tt == @tt').drop(columns='tt')
+    for metric in tmp1.metric.unique():
+        print('metric: %s' % metric)
+        tmp2 = tmp1.query('metric==@metric').drop(columns='metric')
+        tmp2.reset_index(None,True,True)
+        u_iqr = tmp2.iqr.unique()
+        n_iqr = u_iqr.shape[0]
+        # Index to smallest dtrain/retrain
+        tmp3 = tmp2.groupby(cn_li).apply(lambda x: x.loc[x.train.idxmin(),cn_keep[:-1]])
+        tmp3 = tmp3.reset_index(None,True).rename(columns={'value':'t1'}).drop(columns='se')
+        # Merge back on with original
+        tmp4 = tmp2[cn_keep].merge(tmp3)
+        tmp4 = tmp4.assign(ub=lambda x: x.value+x.se, lb=lambda x: x.value-x.se).drop(columns='se')
+        tmp4[cn_bounds] = tmp4[cn_bounds].divide(tmp4.t1,axis=0)
+        tmp4 = tmp4.assign(train=lambda x: pd.Categorical(x.train,np.sort(x.train.unique())))
+        
+        # Find the "best" 
+        tmp5 = tmp2.groupby(cn_li).apply(lambda x: x.loc[x.value.idxmax(),cn_keep[:-1]])
+        tmp5  = tmp5.reset_index(None,True).rename(columns={'value':'best'}).drop(columns='se')
+        tmp6 = tmp2[cn_keep].merge(tmp3).merge(tmp5).assign(gain=lambda x: x.best - x.value)
+        tmp6 = tmp6.assign(within=lambda x: x.gain <= 0.5*x.se)
+        # tmp6.groupby('lead').within.sum()
+
+        # Find the smallest/largest within
+        tmp7 = tmp6.groupby(cn_li+['within']).train.apply(lambda x: 
+                    pd.DataFrame({'mi':x.min(),'mx':x.max()},index=[0]))
+        tmp7 = tmp7.reset_index().drop(columns='level_'+str(len(cn_li)+1))
+        tmp7 = tmp7.query('within == True').assign(val=lambda x: np.where(tt=='rtrain',x.mx,x.mi))
+        tmp7 = tmp7.drop(columns=['within','mi','mx']).reset_index(None,True)
+        # Save for later
+        tmp7 = tmp7.assign(tt=tt,metric=metric)
+        holder.append(tmp7)
+
+        # Set the title
+        gtit = 'metric=%s, training=%s' % (metric, tt)
+        tmp_di = {k:v for k,v in di_iqr.items() if k in list(u_iqr)}
+
+        # (i) box plot
+        fn1 = 'gg_' + tt + '_box_' + metric + '.png'
+        gg1 = (ggplot(tmp4,aes(x='train',y='value*100',color='iqr')) + 
+            theme_bw() + geom_boxplot() + 
+            facet_wrap('~iqr',labeller=labeller(iqr=tmp_di),nrow=1) + 
+            labs(x='Training (days)',y='Index (day 1 == 100)') + 
+            theme(axis_text_x=element_text(angle=90)) + 
+            guides(color=False) + ggtitle(gtit) + 
+            geom_hline(yintercept=100) + 
+            scale_color_discrete(name='IQR',labels=list(tmp_di.values())))
+        gg_save(fn1, dir_figures, gg1, int(n_iqr*5), 4)
+        
+        # (ii) Time trend
+        fn2 = 'gg_' + tt + '_trend_' + metric + '.png'
+        gg2 = (ggplot(tmp4, aes(x='train.astype(int)',y='value*100',color='iqr')) + 
+            theme_bw() + geom_line() + ggtitle(gtit) + 
+            geom_hline(yintercept=100) + 
+            labs(x='Training (days)',y='Index (day 1 == 100)') + 
+            facet_wrap('~lead',labeller=label_both,nrow=4) + 
+            theme(axis_text_x=element_text(angle=90)) + 
+            scale_color_discrete(name='IQR',labels=list(tmp_di.values())))
+        gg_save(fn2, dir_figures, gg2, 12, 7)
+
+# Merge the infimum/supremum for analysis later
+di_tt = {'dtrain':'# Training days', 'rtrain':'# Retraining days'}
+di_metric = {'spearman':"Spearman's rho", 'MAE':'Mean Abs Error','sens':'Sensivitiy','prec':'Precision'}
+
+dat_infimum = pd.concat(holder).reset_index(None,True)
+tmp = dat_infimum.query('metric.isin(["MAE","prec"])')
+gg_infimum = (ggplot(tmp,aes(x='lead',y='val',color='iqr')) + 
+    theme_bw() + geom_point(size=0.5) + geom_line() + 
+    labs(y='Smallest/largest training/retraining',x='Forecasting horizon') + 
+    ggtitle('Within 0.5SDs of optimal') + 
+    scale_x_continuous(breaks=list(range(1,25,1))) + 
+    theme(axis_text_x=element_text(angle=90)) + 
+    facet_grid('tt~metric',scales='free_y',labeller=labeller(tt=di_tt,metric=di_metric)) +
+    scale_color_discrete(name='IQR',labels=list(di_iqr.values())))
+gg_save('drtain_infimum.png', dir_figures, gg_infimum, 10, 6)
 
 
 
