@@ -9,8 +9,10 @@ parser.add_argument('--ylbl', type=str, default=None, help='Column from hourly_y
 parser.add_argument('--model_name', type=str, default=None, help='Model to use from ~/mdls')
 parser.add_argument('--model_args', type=str, default=None, 
     help='Optional arguments for model class (e.g. n_trees=100,depth=3,...)')
+parser.add_argument('--write_scores', default=False, action='store_true')
 args = parser.parse_args()
 print(args)
+write_scores = args.write_scores
 lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
@@ -216,6 +218,8 @@ di_res = {'scores':df_res, 'reg':perf_reg, 'ord':perf_ord}
 
 # Save predictions for later
 for fold in di_res:
+    if (fold == 'scores') and not write_scores:
+        continue
     path = os.path.join(dir_model, fold, fn_write)
     di_res[fold].to_csv(path, index=False)
 
