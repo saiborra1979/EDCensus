@@ -16,7 +16,7 @@ ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
 # # For debugging
 # dtrain=60; h_retrain=int(24*30); lag=24; lead=24; 
-# model_args='n_trees=100,depth=3,n_jobs=6'; model_name='xgboost'; ylbl='census_max'
+# model_args='n_trees=100,depth=3,n_jobs=6'; model_name='rxgboost'; ylbl='census_max'
 
 import os
 import numpy as np

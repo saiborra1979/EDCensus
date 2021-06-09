@@ -51,7 +51,8 @@ del holder
 print(dat_clin.head())
 
 # Concert to datetime
-dat_clin['arrived'] = pd.to_datetime(dat_clin.arrived.str.strip().str.replace('\\s', '-'),format='%d/%m/%y-%H%M')
+tmp = dat_clin.arrived.str.strip().str.replace('\\s', '-',regex=True)
+dat_clin['arrived'] = pd.to_datetime(tmp,format='%d/%m/%y-%H%M')
 # Drop rows if they are arrival time data
 dat_clin = dat_clin[dat_clin.arrived.notnull()]
 # Remove any duplicated patient visits
@@ -75,7 +76,7 @@ ss_index = pd.Series([pc_extract(ss=x, pat=prov_code) for
 pc_vec = pd.Series([ss[idx:] for ss, idx in
                     zip(dat_clin.address.fillna(''), ss_index)])
 # Remove any spaces and keep only
-pc_vec = pc_vec.str.replace(' ', '')
+pc_vec = pc_vec.str.replace(' ', '',regex=True)
 pc_vec = pd.Series(np.where(pc_vec.str.len() == 6, pc_vec, ''))
 assert len(pc_vec) == dat_clin.shape[0]
 dat_clin['PostalCode'] = pc_vec
@@ -130,20 +131,20 @@ dat_clin.drop(columns=['meds'], inplace=True)
 
 # weight
 tmp = np.where(dat_clin.weight == 'None', np.NaN, dat_clin.weight)
-tmp = pd.Series(tmp).str.replace('\\skg', '')
-tmp = tmp.str.replace('\\([P!S]\\)\\s', '').astype(float)
+tmp = pd.Series(tmp).str.replace('\\skg', '',regex=True)
+tmp = tmp.str.replace('\\([P!S]\\)\\s', '',regex=True).astype(float)
 dat_clin['weight'] = tmp
 
 # pulse/resp/temp
-dat_clin['resp'] = dat_clin.resp.str.replace('[^0-9]', '')
+dat_clin['resp'] = dat_clin.resp.str.replace('[^0-9]', '',regex=True)
 dat_clin['resp'] = np.where(dat_clin.resp == '', np.NaN,
                             dat_clin.resp).astype(float)
-dat_clin['pulse'] = dat_clin.pulse.str.replace('[^0-9]', '')
+dat_clin['pulse'] = dat_clin.pulse.str.replace('[^0-9]', '',regex=True)
 dat_clin['pulse'] = np.where(dat_clin.pulse == '', np.NaN,
                             dat_clin.pulse).astype(float)
-tmp = dat_clin.temp.str.replace('\\(.\\)\\s', '')
+tmp = dat_clin.temp.str.replace('\\(.\\)\\s', '',regex=True)
 tmp = tmp.str.split('\\s', n=1, expand=True).iloc[:, 0]
-tmp = tmp.str.replace('[^0-9\\.]', '')
+tmp = tmp.str.replace('[^0-9\\.]', '',regex=True)
 dat_clin['temp'] = np.where(tmp == '', np.NaN, tmp).astype(float)
 
 # force respitory rate and pulse to reasonable values
@@ -152,17 +153,17 @@ resp[~((resp > 0) & (resp < 80))] = np.NaN
 pulse[~((pulse >= 20) & (pulse <= 220))] = np.NaN
 
 # convert blood pressure to Systolic/Diastolic measures
-tmp_sys_dis = dat_clin.BP.str.replace('\\(.\\)\\s','')
+tmp_sys_dis = dat_clin.BP.str.replace('\\(.\\)\\s','',regex=True)
 tmp_sys_dis = tmp_sys_dis.str.split('\\s', expand=True).iloc[:, 0]
 tmp_sys_dis = tmp_sys_dis.str.split('\\/', expand=True)
-tmp_sys_dis = tmp_sys_dis.apply(lambda x: x.str.replace('[^0-9]','') ,axis=0)
+tmp_sys_dis = tmp_sys_dis.apply(lambda x: x.str.replace('[^0-9]','',regex=True) ,axis=0)
 tmp_sys_dis = np.where(tmp_sys_dis == '', np.NaN, tmp_sys_dis).astype(float)
 tmp_sys_dis = pd.DataFrame(tmp_sys_dis, columns=['systolic', 'diastolic'])
 dat_clin = pd.concat([dat_clin, tmp_sys_dis], axis=1).drop(columns=['BP'])
 
 # convert
-age_type = dat_clin.age.str.replace('[0-9\\s]','')
-age_num = dat_clin.age.str.replace('[^0-9]','').astype(int)
+age_type = dat_clin.age.str.replace('[0-9\\s]','',regex=True)
+age_num = dat_clin.age.str.replace('[^0-9]','',regex=True).astype(int)
 age_class = ['days', 'y.o.', 'm.o.', 'wk.o.']
 assert all(age_type.isin(age_class))
 age_num[age_type == 'days'] = age_num[age_type == 'days'] / 365
@@ -190,7 +191,7 @@ for cn in cn_num:
         dat_clin[cn] = dat_clin[cn].fillna(dat_clin[cn].median())
 
 # Replace integers
-dat_clin['CTAS'] = dat_clin.CTAS.astype('str').str.replace('\\.0','')
+dat_clin['CTAS'] = dat_clin.CTAS.astype('str').str.replace('\\.0','',regex=True)
 
 #################################################
 # --- STEP 4: AGGREGATE CATEGORICAL FACTORS --- #

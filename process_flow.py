@@ -43,7 +43,7 @@ for fn in fn_clin:
 dat_clin = pd.concat(holder).reset_index(None, True)
 del holder
 # Convert to datetime
-dat_clin['arrived'] = dat_clin.arrived.str.strip().str.replace('\\s', '-')
+dat_clin['arrived'] = dat_clin.arrived.str.strip().str.replace('\\s', '-',regex=True)
 dat_clin['arrived'] = pd.to_datetime(dat_clin.arrived, format='%d/%m/%y-%H%M')
 dat_clin = dat_clin.sort_values('arrived')
 
@@ -83,9 +83,9 @@ dat_clin.drop(columns=['los_min', 'los_clock'], inplace=True)
 dat_clin['discharged'] = [dat_clin.arrived[i] + pd.Timedelta(minutes=dat_clin.los[i]) for i in range(dat_clin.shape[0])]
 
 # Get the size/composition of the clinical team
-mds = dat_clin.md_team.str.strip().str.replace('\\;$|^\\;', '')
-mds = mds.str.replace('\\;\\s', ';').str.replace('^\\s', '')
-mds = mds.str.replace('[^A-Z\\;]', '_')
+mds = dat_clin.md_team.str.strip().str.replace('\\;$|^\\;', '',regex=True)
+mds = mds.str.replace('\\;\\s', ';',regex=True).str.replace('^\\s', '',regex=True)
+mds = mds.str.replace('[^A-Z\\;]', '_',regex=True)
 # mds = mds.str.split('\\;')  # For counting below
 dat_clin['md_team'] = mds.copy()
 
@@ -228,7 +228,7 @@ hourly_tt = hourly_tt.assign(date=lambda x: pd.to_datetime(
 hourly_tt = hourly_tt[(hourly_tt.date >= dt_min) & (hourly_tt.date <= dt_max)].reset_index(None, True)
 # Long version for benchmarks
 hourly_tt_long = hourly_tt.melt(['date'] + cn_date, ['tt_arrived', 'tt_discharged']).assign(
-    tt=lambda x: x.tt.str.replace('tt_', '')).rename(columns={'value': 'census'})
+    tt=lambda x: x.tt.str.replace('tt_', '',regex=True)).rename(columns={'value': 'census'})
 
 # (ii) Census moments in that hour  ['max','var']
 cn_moment = ['max', 'var']

@@ -1,31 +1,7 @@
 #!/bin/bash
 
-# SHELL PIPELINE TO REPLICATE RESULTS
-echo "THE STARTING DIRECTORY"
-pwd
-
-# If on HPF point to the python path
-loc=$(pwd | cut -d'/' -f3)
-
-if [ "$loc" == "c" ]; then
-  echo "we are on predator"
-  conda activate CensusFlow
-elif [ "$loc" == "erik" ]; then
-  echo "we are on Snowqueen"
-  conda activate CensusFlow
-elif [ "$loc" == "largeprojects" ]; then
-	echo "WE ARE ON HPF"
-	cd /hpf/largeprojects/agoldenb/edrysdale/ED/CensusFlow || return
-  which python
-  module load python/3.8.1
-  fold_env="/hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate"
-  . $fold_env
-  which python
-else
-  echo "where are we?!"
-  return
-fi
-
+conda activate CensusFlow
+ 
 #############################
 # --- (1) PREPROCESSING --- #
 
