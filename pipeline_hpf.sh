@@ -2,7 +2,7 @@
 
 cd /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/CensusFlow || return
 module load python/3.8.1
-souce /hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate
+source /hpf/largeprojects/agoldenb/edrysdale/venv/CensusFlow/bin/activate
 which python
 
 echo "(1.A) process_demographics: demographic triage data"
