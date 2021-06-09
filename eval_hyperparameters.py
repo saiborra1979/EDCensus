@@ -14,11 +14,12 @@ SEARCHES THROUGH ~/test FOLDER TO FIND PERFORMANCE FOR DIFFERENT MODEL CONFIGS
 # assert isinstance(model_list, list)
 
 # For debugging
-model_list = ['xgboost']
+model_list = ['xgboost', 'rxgboost', 'rxgboost2']
 
 import os
 import pandas as pd
 import numpy as np
+from pandas.core.frame import DataFrame
 from scipy import stats
 from time import time
 from plotnine import *
@@ -43,6 +44,25 @@ def drop_zero_var(df):
     u_count = df.apply(lambda x: x.unique().shape[0],0)
     df = df[u_count[u_count > 1].index]
     return df
+
+from scipy.stats import norm, chi2
+from funs_support import cvec
+
+# Average difference
+def fast_F(x):
+    assert x.columns.get_level_values(0).isin(['value','se']).all()
+    k = x.value.shape[1]
+    assert k == x.se.shape[1]
+    mu = cvec(x.value.mean(1).values)
+    se = cvec(np.sqrt((x.se**2).mean(1)).values)
+    Zhat = (x.value.values - mu) / se
+    Zhat2 = np.sum(Zhat**2, 1)
+    pval = chi2(df=k-1).cdf(np.sum(Zhat**2,1))
+    pval = 2 * np.minimum(pval, 1-pval)
+    zscore = norm.ppf(pval)
+    zscore = np.where(np.abs(zscore) == np.inf, 0, zscore)
+    return zscore, pval
+
 
 ################################
 # --- (1) PREPARE BASELINE --- #
@@ -144,6 +164,9 @@ model_ord = pd.concat(holder_ord).reset_index(None,True)
 model_ord.lead = pd.Categorical(model_ord.lead)
 model_ord = drop_zero_var(model_ord)
 
+assert model_reg.notnull().all().all()
+assert model_ord.notnull().all().all()
+
 #####################################
 # --- (3) ALL MODEL PERFORMANCE --- #
 
@@ -181,12 +204,52 @@ gg_hpf_ord = (ggplot(model_ord,aes(x='lead',y='value')) +
     geom_point(color='red',data=bl_ord))
 gg_save('gg_hpf_ord.png', dir_figures, gg_hpf_ord, 12, 5)
 
+#######################################
+# --- (4) VARIATION ACROSS MODELS --- #
+
+# Find the dtrain/h_retrain that overlap
+count_model = model_reg.groupby(['model_name','dtrain','h_retrain']).size().reset_index()
+count_model = count_model.pivot_table(0,cn_hp,'model_name')
+count_model = count_model[count_model.notnull().all(1)].reset_index()[cn_hp]
+
+reg_sub = model_reg.query('dtrain.isin(@count_model.dtrain) & h_retrain.isin(@count_model.h_retrain)').reset_index(None,True)
+ord_sub = model_ord.query('dtrain.isin(@count_model.dtrain) & h_retrain.isin(@count_model.h_retrain)').reset_index(None,True)
+# Calculate the z-score differences
+tmp = reg_sub.pivot_table(['value','se'],cn_gg_reg+cn_hp,'model_name')
+reg_sub_wide = pd.DataFrame(np.c_[fast_F(tmp)],columns=['zscore','pval'])
+reg_sub_wide.index=tmp.index
+reg_sub_wide.reset_index(None,inplace=True)
+
+posd = position_dodge(0.5)
+gg_reg_models = (ggplot(reg_sub,aes(x='lead',y='value',color='model_name',shape='iqr')) + 
+    theme_bw() + geom_point(position=posd,size=3) + 
+    geom_linerange(aes(ymin='CI_lb',ymax='CI_ub'),position=posd) + 
+    facet_grid('metric~dtrain+h_retrain',scales='free_y',labeller=label_both) + 
+    scale_shape_manual(name='IQR',labels=['25%','50%','75%'],values=['$L$','$M$','$U$']) + 
+    scale_color_discrete(name='Models'))
+gg_save('gg_reg_models.png', dir_figures, gg_reg_models, 7, 7)
+
+gg_reg_zscore = (ggplot(reg_sub_wide,aes(x='lead',y='zscore',shape='iqr')) + 
+    theme_bw() + geom_point(position=posd,size=3) + 
+    geom_hline(yintercept=0,color='red',linetype='--') + 
+    facet_grid('metric~dtrain+h_retrain',scales='free_y',labeller=label_both) + 
+    scale_shape_manual(name='IQR',labels=['25%','50%','75%'],values=['$L$','$M$','$U$']))
+gg_save('gg_reg_zscore.png', dir_figures, gg_reg_zscore, 7, 7)
+
+gg_ord_models = (ggplot(ord_sub,aes(x='lead',y='value',color='model_name')) + 
+    theme_bw() + geom_point(position=posd,size=1) + 
+    geom_linerange(aes(ymin='CI_lb',ymax='CI_ub'),position=posd) + 
+    facet_grid('metric~dtrain+h_retrain',scales='free_y',labeller=label_both) + 
+    scale_color_discrete(name='Models'))
+gg_save('gg_ord_models.png', dir_figures, gg_ord_models, 7, 7)
+
+
 ##############################################
-# --- (4) VARIATION ACROSS DTRAIN/RTRAIN --- #
+# --- (5) VARIATION ACROSS DTRAIN/RTRAIN --- #
 
 cn_metric = ['MAE','spearman']
 
-n_dtrain_htrain = model_reg.groupby(['dtrain','h_retrain']).size().reset_index().rename(columns={0:'n'})
+n_dtrain_htrain = model_reg.groupby(cn_hp).size().reset_index().rename(columns={0:'n'})
 retrain_star = n_dtrain_htrain.h_retrain.value_counts().reset_index().query('h_retrain>1')
 retrain_star = retrain_star['index'].max()
 print('Sup retraining hours with > 1 obs: %s' % retrain_star)
