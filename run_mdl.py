@@ -16,9 +16,9 @@ write_scores = args.write_scores
 lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
-# # For debugging
-# dtrain=60; h_retrain=int(24*30); lag=24; lead=24; 
-# model_args='n_trees=100,depth=3,n_jobs=6'; model_name='rxgboost'; ylbl='census_max'
+# For debugging
+dtrain=60; h_retrain=int(24*30); lag=24; lead=24; 
+model_args='n_trees=100,depth=3,n_jobs=6'; model_name='rxgboost'; ylbl='census_max'
 
 import os
 import numpy as np
@@ -116,6 +116,7 @@ for ii in range(nhours):
         enc_yX = yX_process(cn=cn_all, lead=lead, lag=lag, 
                 cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], cn_bin=di_cn['bin'])
         enc_yX.fit(X=Xtrain)
+        break
         regressor = model(encoder=enc_yX, lead=lead, lag=lag, di_model=di_model)
         regressor.fit(X=Xtrain, y=ytrain)
         nleft, nsec = nhours-(ii+1), time() - stime

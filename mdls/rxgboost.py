@@ -1,13 +1,12 @@
 import numpy as np
-import pandas as pd
 from xgboost import XGBRegressor as GBR
 from math import modf
 
-# di_model={'core_buffer':'2', 'eta':'0.1', 'depth':'3'}
+# di_model={'n_jobs':'2', 'eta':'0.1', 'depth':'3'}
 # self=model(encoder=enc_yX, lead=lead, lag=lag, di_model=di_model)
 class model():
-    def __init__(self, encoder, lead=24, lag=24, di_model=None):
-        self.enc = encoder
+    def __init__(self, encoder, di_model=None, lead=24, lag=24):
+        self.encoder = encoder
         self.lead = np.arange(1,lead+1)
         self.k = lead
         self.lag = lag
@@ -17,23 +16,23 @@ class model():
         self.di_model = {'n_trees':100, 'depth':3, 'n_jobs':1, 'eta':0.3}
         if di_model is not None:
             for k in di_model.keys():
-                assert k in self.di_model
-                val_k = float(di_model[k])
-                frac, _ = modf(val_k)
-                if frac == 0:
-                    val_k = int(val_k)
-                self.di_model[k] = val_k
+                if k in self.di_model:  # Ignore dictionary terms not in default
+                    val_k = float(di_model[k])
+                    frac, _ = modf(val_k)
+                    if frac == 0:
+                        val_k = int(val_k)
+                    self.di_model[k] = val_k
 
     # self = regressor
     # X=Xtrain.copy(); y=ytrain.copy()
     def fit(self, X, y):
         assert len(X) == len(y)
-        Xtil = self.enc.transform_X(X, rdrop=self.rdrop)
-        Xnow = self.enc.transform_X(X[-(self.lag+1):], rdrop=0)        
+        Xtil = self.encoder.transform_X(X, rdrop=self.rdrop)
+        Xnow = self.encoder.transform_X(X[-(self.lag+1):], rdrop=0)        
         Xboth = np.concatenate((Xtil[-(self.lag-1):], Xnow),axis=0)
         assert np.all(Xboth[-1] == Xnow)
         assert np.all(Xboth[-2] == Xtil[-1])
-        Ytil = self.enc.transform_y(y, rdrop=self.rdrop)
+        Ytil = self.encoder.transform_y(y, rdrop=self.rdrop)
         assert len(Xtil) == len(Ytil)
         self.di_mdl = {}
         Yfcast = np.zeros([Ytil.shape[1],Ytil.shape[1]]) * np.NaN
@@ -54,12 +53,17 @@ class model():
             Yfcast[:k,k-1] = self.di_mdl[k].predict(Xboth)[-k:]
 
     # X = Xtrain[-25:].copy()
-    def predict(self, X):
-        Xtil = self.enc.transform_X(X,rdrop=0)
+    def predict(self, X, y=None):
+        Xtil = self.encoder.transform_X(X,rdrop=0)
         pred = np.vstack([self.di_mdl[k].predict(Xtil) for k in self.lead]).T
-        if hasattr(self.enc,'enc_Y'):
-            pred = self.enc.inverse_transform_y(pred)
-        return pred
+        if hasattr(self.encoder,'enc_Y'):  # matters if enc_yX.fit(X=Xtrain,y=ytrain)
+            pred = self.encoder.inverse_transform_y(pred)
+        if y is None:
+            return pred
+        else:
+            Ytil = self.encoder.transform_y(y,rdrop=0)
+            return pred, Ytil
+        
 
 # from sklearn.datasets import make_regression
 # from sklearn.multioutput import MultiOutputRegressor, RegressorChain
