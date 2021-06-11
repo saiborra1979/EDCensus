@@ -1,8 +1,7 @@
 # Load standard libaries
-from mdls.funs_gp import mgp_real
-from gpytorch.models import exact_gp
 from funs_support import t2n
-import torch
+import dill
+import pickle
 import numpy as np
 import pandas as pd
 from math import modf
@@ -95,6 +94,10 @@ class model():
             df.drop(columns = 'idx', inplace=True)
         return df
 
+    def pickle_me(self, path):
+        with open(path, 'wb') as file:
+            pickle.dump(self, file)
+    
 # self.gp = gp_wrapper(gp_class=mgp_real, train_x=Yhat, train_y=Ytil, tt='multi')
 # self.gp = gp_wrapper(gp_class=mgp_batch, train_x=Yhat, train_y=Ytil, tt='multi')
 # self.gp = gp_wrapper(gp_class=gp_real, train_x=Yhat, train_y=Ytil[:,12], tt='univariate')

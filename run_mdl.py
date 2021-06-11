@@ -17,7 +17,7 @@ lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
 # # For debugging
-# dtrain=60; h_retrain=int(24*30); lag=24; lead=24; 
+# dtrain=15; h_retrain=int(24*30); lag=24; lead=24; 
 # model_args='base=rxgboost,nval=168,max_iter=100,lr=0.1,max_cg=10000,n_trees=100,depth=3,n_jobs=6'
 # model_name='gp_stacker'; ylbl='census_max'
 
@@ -57,7 +57,7 @@ dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 dir_model = os.path.join(dir_test, model_name)
 makeifnot(dir_model)
-for fold in ['scores','reg','ord']:
+for fold in ['scores', 'reg', 'ord', 'model']:
     path = os.path.join(dir_model,fold)
     makeifnot(path)
 
@@ -116,9 +116,9 @@ for ii in range(nhours):
         enc_yX = yX_process(cn=cn_all, lead=lead, lag=lag, 
                 cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], cn_bin=di_cn['bin'])
         enc_yX.fit(X=Xtrain)
+        # break
         regressor = model(encoder=enc_yX, di_model=di_model)
         regressor.fit(X=Xtrain, y=ytrain)
-        # break
         nleft, nsec = nhours-(ii+1), time() - stime
         rate = (ii + 1) / nsec
         eta = nleft/rate
@@ -225,6 +225,11 @@ for fold in di_res:
         continue
     path = os.path.join(dir_model, fold, fn_write)
     di_res[fold].to_csv(path, index=False)
+
+# Save the model class for later
+fn_pickle = fn_write.replace('.csv','.pickle')
+path_pickle = os.path.join(dir_model, 'model', fn_pickle)
+regressor.pickle_me(path=path_pickle)
 
 # from plotnine import *
 # dir_figures = os.path.join(dir_olu, 'figures', 'census')
