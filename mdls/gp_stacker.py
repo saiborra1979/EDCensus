@@ -96,8 +96,13 @@ class model():
 
     def pickle_me(self, path):
         with open(path, 'wb') as file:
-            pickle.dump(self, file)
-    
+            dill.dump(self, file)
+
+
+# with open(path, 'rb') as file:
+#     tmp = dill.load(file)
+# tmp.predict(X_now.copy())
+
 # self.gp = gp_wrapper(gp_class=mgp_real, train_x=Yhat, train_y=Ytil, tt='multi')
 # self.gp = gp_wrapper(gp_class=mgp_batch, train_x=Yhat, train_y=Ytil, tt='multi')
 # self.gp = gp_wrapper(gp_class=gp_real, train_x=Yhat, train_y=Ytil[:,12], tt='univariate')
