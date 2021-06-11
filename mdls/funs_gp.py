@@ -4,11 +4,13 @@ import numpy as np
 import pandas as pd
 import random
 from funs_support import t2n
+import copy
+from sklearn import metrics
 
 # Load gpytorch libaries
 from gpytorch.settings import max_cg_iterations, fast_pred_var
 from gpytorch.models import ExactGP, IndependentModelList
-from gpytorch.likelihoods import MultitaskGaussianLikelihood, GaussianLikelihood, LikelihoodList
+from gpytorch.likelihoods import MultitaskGaussianLikelihood, GaussianLikelihood, LikelihoodList, likelihood
 from gpytorch.distributions import MultitaskMultivariateNormal, MultivariateNormal
 from gpytorch.mlls import ExactMarginalLogLikelihood, SumMarginalLogLikelihood
 from gpytorch.means import ConstantMean, MultitaskMean
@@ -62,37 +64,50 @@ class mgp_batch(ExactGP):
 ##########################################
 # ----- (2) OPTIMIZATION FUNCTIONS ----- #
 
+# wrapper = self.gp.copy(); x_val=Eta_val.copy(); y_val=Ytil_val.copy() 
 # max_iter=250; max_cg=10000; lr=0.01
-def tune_gp(model, likelihood, ll, max_iter=250, max_cg=10000, lr=0.1):
+def tune_gp(wrapper, x_val=None, y_val=None, 
+            max_iter=250, max_cg=10000, lr=0.1):
+    assert (x_val is None and y_val is None) or (x_val is not None and y_val is not None)
     # Set up optimizers
-    model.train()
-    likelihood.train()
-    optimizer = torch.optim.Adam([{'params': model.parameters()}], lr=lr)
-    mll = ll(likelihood, model)
+    wrapper.model.train(); wrapper.likelihood.train()
+    optimizer = torch.optim.Adam([{'params': wrapper.model.parameters()}], lr=lr)
+    mll = wrapper.ll(wrapper.likelihood, wrapper.model)
     # begin loop
-    tol, i, pct_change, lprev = 1e-3, 0, 1, 0
-    loss_seq = np.zeros(max_iter)
-    while (i < max_iter):  # & (pct_change > tol)
+    r2_prev, i, pct_change, lprev, check = 0, 0, 1, 0, True
+    loss_seq, r2_seq = np.zeros(max_iter), np.NaN*np.zeros(max_iter)
+    while (i < max_iter) & check:  # & (pct_change > tol)
         i += 1
         optimizer.zero_grad()  # Zero gradients from previous iteration
         with max_cg_iterations(max_cg):
             # output = model(model.train_inputs[0])
-            output = model(*model.train_inputs)
-        loss = -mll(output, model.train_targets)
+            output = wrapper.model(*wrapper.model.train_inputs)
+        loss = -mll(output, wrapper.model.train_targets)
         loss.backward()
         ll = loss.item()
         ldiff = lprev - ll
         lprev = ll
-        if (i + 1) % 5 == 0:
-            pct_change = ldiff / ll
-            print('Iter %d/%d - Loss: %.1f, ldiff: %.1f, pct: %.4f' % 
-                        (i + 1, max_iter, ll, ldiff, pct_change))
         optimizer.step()
         torch.cuda.empty_cache()
         loss_seq[i-1] = loss.item()
-    # Set to eval mode
-    model.eval()
-    likelihood.eval()
+        if (i % 5) == 0:
+            pct_change = ldiff / ll
+            print('Iter %d/%d - Loss: %.4f, pct: %.4f' %  (i, max_iter, ll, pct_change))
+            # Check for convergence
+            dseq = -np.diff(loss_seq[:i])
+            # break
+            if not np.all( dseq > 0 ):
+                print('Change in nll is not positive')
+                check = False
+            if x_val is not None:
+                mu_val, se_val = wrapper.predict(x_val)
+                r2 = metrics.r2_score(y_val, mu_val)
+                r2_seq[i-1] = r2
+                print('val R2: %0.1f%%' % (r2*100))
+                if r2 < r2_prev:
+                    print('Validation R2 is not increasing')
+                    check = False
+                r2_prev = r2
     # Save the loss data
     df_loss = pd.DataFrame({'iter':np.arange(max_iter)+1,'loss':loss_seq})
     df_loss = df_loss.query('loss != 0')
@@ -108,13 +123,18 @@ class gp_wrapper():  # Uses multitask for likelihood
         assert tt in ['multi','list','univariate']
         if len(train_y.shape) == 2:
             self.k = train_y.shape[1]
+        # Set likelihood
         if tt == 'multi':
             self.likelihood = MultitaskGaussianLikelihood(num_tasks=self.k)
         elif tt == 'list':
             self.likelihood = LikelihoodList(*[GaussianLikelihood() for z in range(self.k)])
         else:
             self.likelihood = GaussianLikelihood()
-        
+        # Set marginal likelihood
+        if self.tt == 'list':
+            self.ll = SumMarginalLogLikelihood
+        else:
+            self.ll = ExactMarginalLogLikelihood
         # Set the device
         use_cuda = torch.cuda.is_available()
         self.device = "cuda" if use_cuda else "cpu"
@@ -130,12 +150,8 @@ class gp_wrapper():  # Uses multitask for likelihood
         self.model.to(self.device)
         # self.model.float()  # Set if errors show up
 
-    def fit(self, max_iter=250, max_cg=10000, lr=0.01):
-        if self.tt == 'list':
-            ll = SumMarginalLogLikelihood
-        else:
-            ll = ExactMarginalLogLikelihood
-        self.loss = tune_gp(self.model, self.likelihood, ll, max_iter=max_iter, max_cg=max_cg, lr=lr)
+    def fit(self, x_val=None, y_val=None, max_iter=250, max_cg=10000, lr=0.01):
+        self.loss = tune_gp(self, x_val=x_val, y_val=y_val, max_iter=max_iter, max_cg=max_cg, lr=lr)
 
     def forward(self, x):
         return self.mdl.forward(x)
@@ -154,6 +170,7 @@ class gp_wrapper():  # Uses multitask for likelihood
 
     # X = Yhat.copy()
     def predict(self, X):
+        self.likelihood.eval(); self.model.eval()
         x_pred = self.to_tensor(X)
         with torch.no_grad(), fast_pred_var():
             if self.tt == 'list':
@@ -164,7 +181,8 @@ class gp_wrapper():  # Uses multitask for likelihood
                 pred = self.likelihood(self.model(x_pred))
                 mean = t2n(pred.mean)
                 se = t2n(pred.stddev)
+        self.likelihood.train(); self.model.train()
         return mean, se
 
-
-
+    def copy(self):
+        return copy.deepcopy(self)

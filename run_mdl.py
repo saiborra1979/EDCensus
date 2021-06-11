@@ -1,4 +1,4 @@
-# Calls class from ~/mdls folder
+# # Calls class from ~/mdls folder
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--lead', type=int, default=None, help='Number of leads to forecast')
@@ -16,9 +16,10 @@ write_scores = args.write_scores
 lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
-# For debugging
-dtrain=60; h_retrain=int(24*30); lag=24; lead=24; 
-model_args='n_trees=100,depth=3,n_jobs=6'; model_name='rxgboost'; ylbl='census_max'
+# # For debugging
+# dtrain=60; h_retrain=int(24*30); lag=24; lead=24; 
+# model_args='base=rxgboost,nval=168,max_iter=100,lr=0.1,max_cg=10000,n_trees=100,depth=3,n_jobs=6'
+# model_name='gp_stacker'; ylbl='census_max'
 
 import os
 import numpy as np
@@ -45,7 +46,6 @@ model = getattr(getattr(model_class, model_name), 'model')
 
 # (iv) Load remaining packages/folders
 from time import time
-from datetime import datetime
 from funs_support import find_dir_olu, get_date_range, makeifnot, get_reg_score, date2ymw, get_iqr
 from funs_stats import prec_recall_lbls, get_esc_levels
 from mdls.funs_encode import yX_process
@@ -116,16 +116,18 @@ for ii in range(nhours):
         enc_yX = yX_process(cn=cn_all, lead=lead, lag=lag, 
                 cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], cn_bin=di_cn['bin'])
         enc_yX.fit(X=Xtrain)
-        break
-        regressor = model(encoder=enc_yX, lead=lead, lag=lag, di_model=di_model)
+        regressor = model(encoder=enc_yX, di_model=di_model)
         regressor.fit(X=Xtrain, y=ytrain)
+        # break
         nleft, nsec = nhours-(ii+1), time() - stime
         rate = (ii + 1) / nsec
         eta = nleft/rate
         print('ETA: %.1f minutes' % (eta/60))
-    tmp_res = pd.DataFrame(regressor.predict(X_now)).melt(None,None,'lead','pred')
-    tmp_res = tmp_res.assign(lead=lambda x: x.lead+1,date_rt=time_ii)
-    holder.append(tmp_res)
+    tmp_pred = regressor.predict(X_now)
+    if isinstance(tmp_pred, np.ndarray):
+        tmp_pred = pd.DataFrame(tmp_pred).melt(None,None,'lead','pred')
+    tmp_pred = tmp_pred.assign(lead=lambda x: x.lead+1,date_rt=time_ii)
+    holder.append(tmp_pred)
 # Merge and add labels
 df_res = pd.concat(holder).reset_index(None,True)
 df_res = df_res.assign(date_pred=lambda x: x.date_rt + x.lead*pd.offsets.Hour(1))    

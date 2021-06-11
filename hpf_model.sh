@@ -5,7 +5,6 @@
 #PBS -e /home/edrysdale/qsub/
 #PBS -l vmem=16g
 #PBS -l mem=16g
-#PBS -l nodes=1:ppn=12
 
 # Modify the model_args command
 echo "model args="$model_args
