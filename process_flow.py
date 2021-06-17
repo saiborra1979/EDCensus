@@ -25,6 +25,8 @@ assert all([os.path.exists(z) for z in lst_dir])
 
 idx = pd.IndexSlice
 
+cn_date = ['year', 'month', 'day', 'hour']
+
 ######################################
 # --- STEP 1: LOAD CLINICAL DATA --- #
 
@@ -178,8 +180,6 @@ dat_DI_wide.drop(columns=di_low, inplace=True)
 ##########################################
 # --- STEP 5: HOURLY FLOW ON LABS/DI --- #
 
-cn_date = ['year', 'month', 'day', 'hour']
-
 # Get year/month/day/hour
 dat_DI_flow = pd.concat([dat_DI_wide, date2ymdh(dat_DI_wide.order_time)], 1).drop(columns=['order_time'])
 dat_labs_flow = pd.concat([dat_labs_wide, date2ymdh(dat_labs_wide.order_time)], 1).drop(columns=['order_time'])
@@ -217,6 +217,10 @@ dt_min = pd.to_datetime(str(mi_year) + '-' + str(mi_month) + '-' + str(mi_day) +
 # dt_min = dt_min + pd.DateOffset(days=1)
 dt_max = dt_max - pd.DateOffset(days=1)
 print('Start date: %s, end date: %s' % (dt_min, dt_max))
+
+# Save 
+long_census = dat_long[['date','census','ticker']]
+long_census.to_csv(os.path.join(dir_flow,'long_census.csv'),index=False)
 
 # (i) Hourly arrival/discharge
 hourly_tt = dat_long.groupby(cn_date + ['tt']).size().reset_index()

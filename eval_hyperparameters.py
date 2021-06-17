@@ -14,7 +14,7 @@ SEARCHES THROUGH ~/test FOLDER TO FIND PERFORMANCE FOR DIFFERENT MODEL CONFIGS
 # assert isinstance(model_list, list)
 
 # For debugging
-model_list = ['xgboost', 'rxgboost', 'rxgboost2']
+model_list = ['xgboost', 'rxgboost', 'rxgboost2', 'gp_stacker']
 
 import os
 import pandas as pd
@@ -23,7 +23,7 @@ from pandas.core.frame import DataFrame
 from scipy import stats
 from time import time
 from plotnine import *
-from funs_support import date2ymw, find_dir_olu, get_reg_score, get_iqr, gg_save #gg_color_hue
+from funs_support import date2ymw, find_dir_olu, get_reg_score, get_iqr, gg_save, drop_zero_var
 from funs_stats import get_esc_levels, ttest_vec, prec_recall_lbls
 
 dir_base = os.getcwd()
@@ -39,15 +39,9 @@ cn_ymd = ['year', 'month', 'day']
 cn_ymdh = cn_ymd + ['hour']
 cn_ymdl = cn_ymd + ['lead']
 
-def drop_zero_var(df):
-    df = df.copy()
-    u_count = df.apply(lambda x: x.unique().shape[0],0)
-    df = df[u_count[u_count > 1].index]
-    return df
 
 from scipy.stats import norm, chi2
 from funs_support import cvec
-
 # Average difference
 def fast_F(x):
     assert x.columns.get_level_values(0).isin(['value','se']).all()
@@ -166,6 +160,15 @@ model_ord = drop_zero_var(model_ord)
 
 assert model_reg.notnull().all().all()
 assert model_ord.notnull().all().all()
+
+# qq = model_ord.query('model_name=="gp_stacker" & metric=="prec"').reset_index(None,True)
+# q1 = qq[cn_hp]
+# q2 = drop_zero_var(drop_zero_var(qq.model_args.str.split('\\_',6,True))[1].str.split('\\-',1,True)).rename(columns={1:'hval'})
+# qq = pd.concat([q1,q2],1)
+# qq = qq.groupby(list(qq.columns)).size().reset_index().rename(columns={0:'n'})
+# qq.dtrain.value_counts()
+# qq.pivot_table('n',['h_retrain','hval'],'dtrain')
+
 
 #####################################
 # --- (3) ALL MODEL PERFORMANCE --- #
