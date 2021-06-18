@@ -3,7 +3,7 @@
 # hyperparametr search for different models
 dir_err=/home/edrysdale/qsub
 
-section_list="gp_stacker"  #xgboost
+section_list="gp_stacker" # xgboost"
 
 n_jobs=11  # Needs to line up hpf_model.sh: nodes=1:ppn=n_jobs+1
 ppn=$(($n_jobs+1))
@@ -23,11 +23,13 @@ for dtrain in {15..60..15}; do
 for rtrain in {1..7..2}; do
 	i=$(($i+1))
 	echo "Iteration: "$i
-	perm="model=gp_stacker_dtrain="$dtrain"_rtrain="$rtrain
+	perm="model=gp_stacker_dtrain="$dtrain"_rtrain="$rtrain"_hval="$nval
 	echo $perm
 	# model_args written with "-", needs to become "," in hpf_model.sh
 	model_args=base=rxgboost-nval=$nval-max_iter=100-lr=0.1-n_trees=$n_tree-depth=$depth-n_jobs=$n_jobs
-	break 3
+	qsub -N "cpu_"$perm -l nodes=1:ppn=$ppn -v model_name=gp_stacker,dtrain=$dtrain,rtrain=$rtrain,model_args=$model_args hpf_model.sh
+#	qsub -N "gpu_"$perm -q gpu -l nodes=1:ppn=$ppn:gpus=1 -v model_name=gp_stacker,dtrain=$dtrain,rtrain=$rtrain,model_args=$model_args hpf_model.sh
+#	break 3
 done; done; done
 
 
@@ -63,8 +65,8 @@ for rtrain in $retrain_seq; do
 	# model_args written with "-", needs to become "," in hpf_model.sh
 	model_args=n_trees=$n_tree-depth=$depth-n_jobs=$n_jobs
 	# PBS for number of jobs needs to be set on the commmand line: -l nodes=1:ppn=12
-	#qsub -N $perm -l nodes=1:ppn=$ppn -v model_name=$model,dtrain=$dtrain,rtrain=$rtrain,model_args=$model_args hpf_model.sh
-#        return
+	qsub -N $perm -l nodes=1:ppn=$ppn -v model_name=$model,dtrain=$dtrain,rtrain=$rtrain,model_args=$model_args hpf_model.sh
+	break 5
 done; done; done; done; done
 
 fi
