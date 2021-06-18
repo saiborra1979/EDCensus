@@ -1,5 +1,5 @@
+from datetime import timezone
 import os
-from posix import XATTR_REPLACE
 import numpy as np
 import pandas as pd
 from plotnine import *
@@ -37,7 +37,9 @@ print('dmin: %s, dmax: %s' % (dmin, dmax))
 
 # Load the long census
 df_wb = pd.read_csv(os.path.join(dir_flow,'long_census.csv'))
+df_wb = df_wb[df_wb.date>='2021-01-01'].reset_index(None,True)
 df_wb['date'] = pd.to_datetime(df_wb.date)
+df_wb['date'] = df_wb.date.dt.tz_localize(tz='America/Toronto',nonexistent='shift_forward')
 # Find the last arrival time
 wb_max = df_wb.query('ticker == 1').date.max()
 df_wb = df_wb[df_wb.date <= wb_max]
@@ -45,13 +47,13 @@ df_wb = df_wb[df_wb.date <= wb_max]
 # Load the real-time database
 df_rt = pd.read_csv(os.path.join(dir_data,'census_rt.csv'))
 df_rt.rename(columns={'metric_value':'census', 'processed_time':'date'}, inplace=True)
-df_rt['date'] = pd.to_datetime(df_rt.date)
-df_rt['date'] = pd.to_datetime(df_rt.date.dt.strftime(dfmt+' %H:%M:%S'))
+df_rt['date'] = pd.to_datetime(df_rt.date,utc=True)
+df_rt['date'] = df_rt.date.dt.tz_convert(tz='America/Toronto')
 df_rt = df_rt.assign(ticker=lambda x: x.census.diff().fillna(0).astype(int))
 
 # Look at first full day
-dstart = pd.to_datetime(df_rt.time.min().strftime('%Y-%m-%d'))
-dend = dstart + pd.DateOffset(days=2)
+dstart = pd.to_datetime(df_rt.date.min().strftime('%Y-%m-%d')).tz_localize(tz='EST')
+dend = dstart + pd.DateOffset(days=3)
 
 rt_sub = df_rt.query('date >= @dstart & date < @dend')
 wb_sub = df_wb.query('date >= @dstart & date < @dend')
@@ -65,15 +67,32 @@ tmp_vlines = tmp_vlines.assign(lbl=lambda x: x.date.dt.strftime('%b, %d'))
 tmp_vlines = pd.concat([tmp_vlines.assign(msr='census'),tmp_vlines.assign(msr='ticker')])
 tmp_vlines = tmp_vlines.merge(rt_wb_sub.groupby('msr').value.quantile(0.9).reset_index())
 
+# tmp1 = rt_wb_sub.query('msr=="census" & tt!="rt"')
+# tmp2 = rt_wb_sub.query('msr=="census" & tt=="rt"')
+# size=2,alpha=0.5
+
 gg_rt_wb = (ggplot(rt_wb_sub, aes(y='value',x='date',color='tt')) + 
     theme_bw() + geom_line() + 
     facet_wrap('~msr',scales='free_y',ncol=1,labeller=labeller(msr=di_rt)) + 
     geom_text(aes(x='date',y='value',label='lbl'),data=tmp_vlines, inherit_aes=False) + 
     geom_vline(aes(xintercept='date'),linetype='--',data=tmp_vlines, inherit_aes=False) + 
-    scale_color_discrete(name='Dataset',labels=['HeroAI','WorkBench']) + 
+    scale_color_discrete(name='Dataset', labels=['HeroAI', 'WorkBench']) + 
     theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
     scale_x_datetime(date_breaks='3 hours',date_labels='%I%p'))
-gg_save('gg_rt_wb',dir_figures,gg_rt_wb,6,8)
+gg_save('gg_rt_wb',dir_figures,gg_rt_wb, 9, 8)
+
+q1 = rt_wb_sub.query('msr=="census"').drop(columns='msr').sort_values('date').reset_index(None,True)
+q1 = q1.assign(date=lambda x: x.date.dt.strftime('%Y-%m-%d %H:%M')).groupby(['date','tt']).value.mean().reset_index()
+q1 = q1.pivot('date','tt','value').fillna(method='ffill')
+q1 = q1[q1.notnull().all(1)]
+
+m_seq = range(-10,11) #[pd.DateOffset(hours=l) for l in range(-10,11)]
+
+holder = []
+for m in m_seq:
+    tmp = pd.Series({'shift':m,'rho':q1.assign(wb=lambda x: x.wb.shift(m)).corr().iloc[0,1]})
+    holder.append(tmp)
+pd.concat(holder,1).T.sort_values('rho',ascending=False).reset_index(None,True)
 
 
 ###################################

@@ -2,7 +2,8 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--lead', type=int, default=None, help='Number of leads to forecast')
-parser.add_argument('--lag', type=int, default=None, help='Number of lags to forecast')
+parser.add_argument('--lag', type=int, default=None, help='Number of lags to use in X')
+parser.add_argument('--month', type=int, default=1, help='Which month to use since March-2020 onwards')
 parser.add_argument('--dtrain', type=int, default=5, help='# of training days')
 parser.add_argument('--h_retrain', type=int, default=24, help='Frequency of retraining')
 parser.add_argument('--ylbl', type=str, default=None, help='Column from hourly_yX.csv to forecast')
@@ -13,11 +14,11 @@ parser.add_argument('--write_scores', default=False, action='store_true')
 args = parser.parse_args()
 print(args)
 write_scores = args.write_scores
-lead, lag, dtrain, h_retrain = args.lead, args.lag, args.dtrain, args.h_retrain
+lead, lag, month, dtrain, h_retrain = args.lead, args.lag, args.month, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 
 # # For debugging
-# dtrain=15; h_retrain=int(24*30); lag=24; lead=24; 
+# dtrain=15; h_retrain=int(24*15); lag=24; lead=24; month=1
 # model_args='base=rxgboost,nval=168,max_iter=100,lr=0.1,max_cg=10000,n_trees=100,depth=3,n_jobs=6'
 # model_name='gp_stacker'; ylbl='census_max'
 
@@ -26,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 # (i) Model class should be in mdls folder
-assert model_name in list(pd.Series(os.listdir('mdls')).str.replace('.py',''))
+assert model_name in list(pd.Series(os.listdir('mdls')).str.replace('.py','',regex=True))
 
 # (ii) Put optional arguments in dict (if any)
 if model_args is not None:
@@ -79,10 +80,11 @@ print('# --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #')
 assert isinstance(dtrain,int) & isinstance(h_retrain,int)
 
 dfmt = '%Y-%m-%d'
-dmax = pd.to_datetime((dates.max()-pd.DateOffset(days=1)).strftime(dfmt))
 dmin = pd.to_datetime('2020-03-01')
-nhours = int((dmax - dmin).total_seconds()/(60*60))
-ndays = int(nhours / 24)
+dmax = dmin + pd.DateOffset(months=month) - pd.DateOffset(seconds=1)
+# dmax = pd.to_datetime((dates.max()-pd.DateOffset(days=1)).strftime(dfmt))
+nhours = int(np.ceil((dmax - dmin).total_seconds()/(60*60)))
+ndays = int(np.ceil(nhours / 24))
 print('day start: %s, day stop: %s (hours=%i, days=%i)' % 
     (dmin.strftime(dfmt),dmax.strftime(dfmt),nhours, ndays))
 
@@ -217,6 +219,7 @@ perf_ord = perf_ord.merge(bs_ord,'left',gg_ord)
 
 fn_write = fn_res.assign(v3=lambda x: x.v1 + '=' + x.v2.astype(str))
 fn_write = fn_write.v3.str.cat(sep='+')+'.csv'
+fn_write = 'month='+str(month)+'+'+fn_write
 di_res = {'scores':df_res, 'reg':perf_reg, 'ord':perf_ord}
 
 # Save predictions for later
