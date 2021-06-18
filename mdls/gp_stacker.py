@@ -1,7 +1,6 @@
 # Load standard libaries
 from funs_support import t2n
 import dill
-import pickle
 import numpy as np
 import pandas as pd
 from math import modf
@@ -75,6 +74,19 @@ class model():
         print('(ii) Fitting GP')
         self.gp = gp_wrapper(gp_class=gp_real, train_x=Eta_train, train_y=Ytil_train, tt='list')
         self.gp.fit(x_val=Eta_val, y_val=Ytil_val, max_iter=max_iter, max_cg=max_cg, lr=lr)
+        tmp_di = self.gp.model.state_dict()
+        # Refit baseline model
+        print('Refitting baseline')
+        self.base.fit(y=y, X=X)
+        Eta, Ytil = self.base.predict(X=X, y=y)
+        Ytil = np.where(np.isnan(Ytil),Eta, Ytil)
+        self.enc_Y = StandardScaler().fit(Ytil)
+        Eta = self.enc_Y.transform(Eta)
+        Ytil = self.enc_Y.transform(Ytil)
+        # Update X/y
+        self.gp = gp_wrapper(gp_class=gp_real, train_x=Eta, train_y=Ytil, tt='list')
+        self.gp.model.load_state_dict(tmp_di)
+        
 
     # X = X_now.copy(); #Xtrain[-(lag+2):].copy()
     def predict(self, X):
@@ -89,7 +101,7 @@ class model():
         df_se = pd.DataFrame(self.enc_Y.scale_ * se).assign(tt='se')
         df = pd.concat([df_mu,df_se],0).rename_axis('idx').reset_index()
         df = df.melt(['idx','tt'],None,'lead').pivot_table('value',['lead','idx'],'tt')
-        df.reset_index(inplace=True)
+        df = df.reset_index().assign(lead=lambda x: x.lead+1)
         if df.idx.max() == 0:
             df.drop(columns = 'idx', inplace=True)
         return df

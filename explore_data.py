@@ -1,4 +1,5 @@
 import os
+from posix import XATTR_REPLACE
 import numpy as np
 import pandas as pd
 from plotnine import *
@@ -10,6 +11,7 @@ warnings.filterwarnings("ignore", category=PlotnineWarning)
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
+dir_data = os.path.join(dir_olu, 'data')
 dir_figures = os.path.join(dir_olu, 'figures', 'census')
 dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
@@ -29,6 +31,50 @@ dfmt = '%Y-%m-%d'
 dmin = pd.to_datetime((df_yX.date.min() + pd.DateOffset(days=2)).strftime(dfmt))
 dmax = pd.to_datetime((df_yX.date.max() - pd.DateOffset(days=2)).strftime(dfmt))
 print('dmin: %s, dmax: %s' % (dmin, dmax))
+
+######################################
+# --- (3) COMPARISON TO REALTIME --- #
+
+# Load the long census
+df_wb = pd.read_csv(os.path.join(dir_flow,'long_census.csv'))
+df_wb['date'] = pd.to_datetime(df_wb.date)
+# Find the last arrival time
+wb_max = df_wb.query('ticker == 1').date.max()
+df_wb = df_wb[df_wb.date <= wb_max]
+
+# Load the real-time database
+df_rt = pd.read_csv(os.path.join(dir_data,'census_rt.csv'))
+df_rt.rename(columns={'metric_value':'census', 'processed_time':'date'}, inplace=True)
+df_rt['date'] = pd.to_datetime(df_rt.date)
+df_rt['date'] = pd.to_datetime(df_rt.date.dt.strftime(dfmt+' %H:%M:%S'))
+df_rt = df_rt.assign(ticker=lambda x: x.census.diff().fillna(0).astype(int))
+
+# Look at first full day
+dstart = pd.to_datetime(df_rt.time.min().strftime('%Y-%m-%d'))
+dend = dstart + pd.DateOffset(days=2)
+
+rt_sub = df_rt.query('date >= @dstart & date < @dend')
+wb_sub = df_wb.query('date >= @dstart & date < @dend')
+rt_wb_sub = pd.concat([rt_sub.assign(tt='rt'),wb_sub.assign(tt='wb')]).reset_index(None,True)
+
+rt_wb_sub = rt_wb_sub.melt(['date','tt'],None,'msr')
+di_rt = {'census':'Census', 'ticker':'Δ in Census'}
+
+tmp_vlines = pd.DataFrame({'date':pd.date_range(dstart,dend,freq='1D')})
+tmp_vlines = tmp_vlines.assign(lbl=lambda x: x.date.dt.strftime('%b, %d'))
+tmp_vlines = pd.concat([tmp_vlines.assign(msr='census'),tmp_vlines.assign(msr='ticker')])
+tmp_vlines = tmp_vlines.merge(rt_wb_sub.groupby('msr').value.quantile(0.9).reset_index())
+
+gg_rt_wb = (ggplot(rt_wb_sub, aes(y='value',x='date',color='tt')) + 
+    theme_bw() + geom_line() + 
+    facet_wrap('~msr',scales='free_y',ncol=1,labeller=labeller(msr=di_rt)) + 
+    geom_text(aes(x='date',y='value',label='lbl'),data=tmp_vlines, inherit_aes=False) + 
+    geom_vline(aes(xintercept='date'),linetype='--',data=tmp_vlines, inherit_aes=False) + 
+    scale_color_discrete(name='Dataset',labels=['HeroAI','WorkBench']) + 
+    theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
+    scale_x_datetime(date_breaks='3 hours',date_labels='%I%p'))
+gg_save('gg_rt_wb',dir_figures,gg_rt_wb,6,8)
+
 
 ###################################
 # --- (2) CENSUS & ESCALATION --- #
@@ -101,3 +147,11 @@ gg_trans = (ggplot(mat_trans, aes(x='esct1', y='esc', fill='prob')) +
     scale_fill_gradient2(name='Probability', limits=[0, 1.01], breaks=list(np.linspace(0, 1, 5)),low='cornflowerblue', mid='grey', high='indianred', midpoint=0.5) +
     geom_text(aes(label='prob.round(2)')))
 gg_save('gg_trans.png',dir_figures,gg_trans,5.5,5)
+
+
+
+
+
+
+
+

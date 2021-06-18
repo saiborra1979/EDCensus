@@ -20,6 +20,14 @@ from itertools import repeat
 
 from scipy.stats import norm
 
+
+def drop_zero_var(df):
+    df = df.copy()
+    u_count = df.apply(lambda x: x.unique().shape[0],0)
+    df = df[u_count[u_count > 1].index]
+    return df
+
+
 def get_reg_score(x):
     tmp = pd.Series({'spearman': spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred)})
     return tmp
