@@ -11,11 +11,14 @@ parser.add_argument('--model_name', type=str, default=None, help='Model to use f
 parser.add_argument('--model_args', type=str, default=None, 
     help='Optional arguments for model class (e.g. n_trees=100,depth=3,...)')
 parser.add_argument('--write_scores', default=False, action='store_true')
+parser.add_argument('--write_model', default=False, action='store_true')
+
 args = parser.parse_args()
 print(args)
-write_scores = args.write_scores
 lead, lag, month, dtrain, h_retrain = args.lead, args.lag, args.month, args.dtrain, args.h_retrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
+write_scores = args.write_scores
+write_model = args.write_model
 
 # # For debugging
 # dtrain=15; h_retrain=int(24*15); lag=24; lead=24; month=1
@@ -230,9 +233,11 @@ for fold in di_res:
     di_res[fold].to_csv(path, index=False)
 
 # Save the model class for later
+
 fn_pickle = fn_write.replace('.csv','.pickle')
 path_pickle = os.path.join(dir_model, 'model', fn_pickle)
-regressor.pickle_me(path=path_pickle)
+if write_model:
+    regressor.pickle_me(path=path_pickle)
 
 # from plotnine import *
 # dir_figures = os.path.join(dir_olu, 'figures', 'census')
