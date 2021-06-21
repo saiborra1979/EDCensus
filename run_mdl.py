@@ -85,7 +85,7 @@ assert isinstance(dtrain,int) & isinstance(h_retrain,int)
 dfmt = '%Y-%m-%d'
 dmin = pd.to_datetime('2020-03-01')
 dmax = dmin + pd.DateOffset(months=month) - pd.DateOffset(seconds=1)
-# dmax = pd.to_datetime((dates.max()-pd.DateOffset(days=1)).strftime(dfmt))
+dmin = pd.to_datetime(dmax.strftime('%Y-%m')+'-01')
 nhours = int(np.ceil((dmax - dmin).total_seconds()/(60*60)))
 ndays = int(np.ceil(nhours / 24))
 print('day start: %s, day stop: %s (hours=%i, days=%i)' % 
