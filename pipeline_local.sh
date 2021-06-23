@@ -45,7 +45,11 @@ python run_bl.py
 ##########################
 # --- (4) EVALUATION --- #
 
-echo "(4.A) eval_hyperparameters.py"
+echo "(4.A) merge_qsub.py"
+# Combine all of the qsub output
+python merge_qsub.py --model_list gp_stacker
+
+echo "(4.B) eval_hyperparameters.py"
 # Will look for most recent GPy folder
 python eval_hyperparameters.py --model_list xgboost
 

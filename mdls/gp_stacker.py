@@ -1,5 +1,5 @@
 # Load standard libaries
-from funs_support import t2n
+import copy
 import dill
 import numpy as np
 import pandas as pd
@@ -74,16 +74,22 @@ class model():
         print('(ii) Fitting GP')
         self.gp = gp_wrapper(gp_class=gp_real, train_x=Eta_train, train_y=Ytil_train, tt='list')
         self.gp.fit(x_val=Eta_val, y_val=Ytil_val, max_iter=max_iter, max_cg=max_cg, lr=lr)
-        tmp_di = self.gp.model.state_dict()
         # Refit baseline model
         print('Refitting baseline')
         self.base.fit(y=y, X=X)
-        Eta, Ytil = self.base.predict(X=X, y=y)
-        Ytil = np.where(np.isnan(Ytil),Eta, Ytil)
-        self.enc_Y = StandardScaler().fit(Ytil)
+        self.update_Xy(Xnew=X, ynew=y)
+
+    # Xnew=X.copy(); ynew=y.copy()
+    def update_Xy(self, Xnew, ynew):
+        print('Updating GP X/Y')
+        # (i) New pandas df to get yhats from xgboost
+        Eta, Ytil = self.base.predict(X=Xnew, y=ynew)
+        Ytil = np.where(np.isnan(Ytil), Eta, Ytil)
+        self.enc_Y.fit(Ytil)
         Eta = self.enc_Y.transform(Eta)
         Ytil = self.enc_Y.transform(Ytil)
-        # Update X/y
+        # (ii) Update X/y within GP
+        tmp_di = self.gp.model.state_dict()
         self.gp = gp_wrapper(gp_class=gp_real, train_x=Eta, train_y=Ytil, tt='list')
         self.gp.model.load_state_dict(tmp_di)
         
@@ -110,6 +116,8 @@ class model():
         with open(path, 'wb') as file:
             dill.dump(self, file)
 
+    def copy(self):
+        return copy.deepcopy(self)
 
 # with open(path, 'rb') as file:
 #     tmp = dill.load(file)

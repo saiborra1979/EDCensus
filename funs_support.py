@@ -20,21 +20,40 @@ from itertools import repeat
 
 from scipy.stats import norm
 
+def any_diff(x, y):
+    uu = np.union1d(x, y)
+    ii = np.intersect1d(x, y)
+    check = len(np.setdiff1d(uu, ii)) > 0
+    return check
+
+
+def find_nonzero_var(df):
+    u_count = df.apply(lambda x: x.unique().shape[0],0)
+    cn = list(u_count[u_count > 1].index)
+    return cn
+
+def find_zero_var(df):
+    u_count = df.apply(lambda x: x.unique().shape[0],0)
+    cn = list(u_count[u_count == 1].index)
+    return cn
 
 def drop_zero_var(df):
     df = df.copy()
-    u_count = df.apply(lambda x: x.unique().shape[0],0)
-    df = df[u_count[u_count > 1].index]
-    return df
+    cn = find_nonzero_var(df)
+    return df[cn]
 
 
 def get_reg_score(x):
     tmp = pd.Series({'spearman': spearmanr(x.y,x.pred)[0],'MAE':MAE(x.y,x.pred)})
     return tmp
 
-def get_iqr(x,alpha=0.25):
+def get_iqr(x,alpha=0.25, add_n=False, ret_df=True):
     tmp = x.quantile([1-alpha,0.5,alpha])
     tmp.index = ['lb','med','ub']
+    if add_n:
+        tmp = tmp.append(pd.Series({'n':len(x)}))
+    if ret_df:
+        tmp = pd.DataFrame(tmp).T
     return tmp
 
 

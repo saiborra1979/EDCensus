@@ -4,8 +4,6 @@ SEARCHES THROUGH ~/test FOLDER TO FIND PERFORMANCE FOR DIFFERENT MODEL CONFIGS
 
 # # Calls class from ~/mdls folder
 # import argparse
-# from numpy.lib.arraysetops import isin
-# from sklearn import metrics
 # parser = argparse.ArgumentParser()
 # parser.add_argument('--model_list', nargs='+', help='Model classes to evaluate (xgboost lasso)')
 # args = parser.parse_args()
@@ -19,12 +17,9 @@ model_list = ['xgboost', 'rxgboost', 'rxgboost2', 'gp_stacker']
 import os
 import pandas as pd
 import numpy as np
-from pandas.core.frame import DataFrame
-from scipy import stats
-from time import time
 from plotnine import *
 from funs_support import date2ymw, find_dir_olu, get_reg_score, get_iqr, gg_save, drop_zero_var
-from funs_stats import get_esc_levels, ttest_vec, prec_recall_lbls
+from funs_stats import get_esc_levels, prec_recall_lbls
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()

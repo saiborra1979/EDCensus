@@ -1,8 +1,6 @@
 #!/bin/bash
 
 # hyperparametr search for different models
-dir_err=/home/edrysdale/qsub
-
 section_list="gp_stacker" # xgboost"
 
 n_jobs=11  # Needs to line up hpf_model.sh: nodes=1:ppn=n_jobs+1
@@ -20,7 +18,7 @@ depth=3
 i=0
 for nval in {24..168..24}; do
 for dtrain in {15..60..15}; do
-for rtrain in {1..7..2}; do
+for rtrain in {24..168..24}; do
 	i=$(($i+1))
 	echo "Iteration: "$i
 	perm="model=gp_stacker_dtrain="$dtrain"_rtrain="$rtrain"_hval="$nval
@@ -32,16 +30,12 @@ for rtrain in {1..7..2}; do
 #	break 3
 done; done; done
 
-
 fi
-
-
 # --------------------- #
 
 
 #########################
 # --- (1) R/XGBOOST --- #
-
 
 if [[ "$section_list" =~ "xgboost" ]]; then
 	echo "(1) R/XGBOOST"
@@ -70,10 +64,6 @@ for rtrain in $retrain_seq; do
 done; done; done; done; done
 
 fi
-
 # --------------------- #
-
-
-
 
 echo "End of hpf_hyperparameter.sh"

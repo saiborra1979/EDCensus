@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #PBS -l walltime=23:59:59
-#PBS -o /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/qsub
-#PBS -e /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/qsub
+#PBS -o /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/qsub/out
+#PBS -e /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/qsub/err
 #PBS -l vmem=32g
 #PBS -l mem=32g
 
@@ -26,7 +26,7 @@ cd /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/CensusFlow || return
 source set_env.sh
 
 # Run python script
-python -u run_mdl.py --month $month --model_name $model_name --model_args $model_args --ylbl census_max --lead 24 --lag 24 --dtrain $dtrain --h_retrain $rtrain
+python -u run_mdl.py --month $month --model_name $model_name --model_args $model_args --ylbl census_max --lead 24 --lag 24 --dtrain $dtrain --h_rtrain $rtrain
 
 echo "End of hpf_xgboost.sh"
 

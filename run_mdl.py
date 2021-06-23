@@ -5,7 +5,7 @@ parser.add_argument('--lead', type=int, default=None, help='Number of leads to f
 parser.add_argument('--lag', type=int, default=None, help='Number of lags to use in X')
 parser.add_argument('--month', type=int, default=1, help='Which month to use since March-2020 onwards')
 parser.add_argument('--dtrain', type=int, default=5, help='# of training days')
-parser.add_argument('--h_retrain', type=int, default=24, help='Frequency of retraining')
+parser.add_argument('--h_rtrain', type=int, default=24, help='Frequency of retraining')
 parser.add_argument('--ylbl', type=str, default=None, help='Column from hourly_yX.csv to forecast')
 parser.add_argument('--model_name', type=str, default=None, help='Model to use from ~/mdls')
 parser.add_argument('--model_args', type=str, default=None, 
@@ -15,15 +15,15 @@ parser.add_argument('--write_model', default=False, action='store_true')
 
 args = parser.parse_args()
 print(args)
-lead, lag, month, dtrain, h_retrain = args.lead, args.lag, args.month, args.dtrain, args.h_retrain
+lead, lag, month, dtrain, h_rtrain = args.lead, args.lag, args.month, args.dtrain, args.h_rtrain
 ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
 write_scores = args.write_scores
 write_model = args.write_model
 
 # # For debugging
-# dtrain=15; h_retrain=int(24*15); lag=24; lead=24; month=1
+# dtrain=15; h_rtrain=int(24*15); lag=24; lead=24; month=1
 # model_args='base=rxgboost,nval=168,max_iter=100,lr=0.1,max_cg=10000,n_trees=100,depth=3,n_jobs=6'
-# model_name='gp_stacker'; ylbl='census_max'
+# model_name='gp_stacker'; ylbl='census_max'; write_scores=False; write_model=False
 
 import os
 import numpy as np
@@ -48,9 +48,13 @@ assert hasattr(model_class, model_name)
 assert hasattr(getattr(model_class, model_name), 'model')
 model = getattr(getattr(model_class, model_name), 'model')
 
+# Models must have four mandatory attributes
+attr_mand = ['fit','predict','update_Xy','pickle_me']
+assert all([hasattr(model, attr) for attr in attr_mand])
+
 # (iv) Load remaining packages/folders
 from time import time
-from funs_support import find_dir_olu, get_date_range, makeifnot, get_reg_score, date2ymw, get_iqr
+from funs_support import find_dir_olu, get_date_range, makeifnot, get_reg_score, date2ymw, get_iqr, any_diff
 from funs_stats import prec_recall_lbls, get_esc_levels
 from mdls.funs_encode import yX_process
 
@@ -61,7 +65,7 @@ dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 dir_model = os.path.join(dir_test, model_name)
 makeifnot(dir_model)
-for fold in ['scores', 'reg', 'ord', 'model']:
+for fold in ['scores', 'agg', 'model']:
     path = os.path.join(dir_model,fold)
     makeifnot(path)
 
@@ -80,7 +84,7 @@ dates = df_X.date.copy()
 # --- STEP 2: CREATE DATE-SPLITS --- #
 print('# --- STEP 2: CREATE DATE-SPLITS AND TRAIN --- #')
 
-assert isinstance(dtrain,int) & isinstance(h_retrain,int)
+assert isinstance(dtrain,int) & isinstance(h_rtrain,int)
 
 dfmt = '%Y-%m-%d'
 dmin = pd.to_datetime('2020-03-01')
@@ -115,7 +119,7 @@ for ii in range(nhours):
     dates_train = dates[idx_train].reset_index(None,True)
     ytrain, Xtrain = yval[idx_train].copy(), df_X[idx_train].copy()
     X_now = Xtrain[-(lag+1):]  # Ensure enough rows to calculate lags
-    if ii % h_retrain == 0:
+    if ii % h_rtrain == 0:
         print('Training range: %s' % (get_date_range(dates_train)))
         print('Current time: %s' % time_ii)
         enc_yX = yX_process(cn=cn_all, lead=lead, lag=lag, 
@@ -128,14 +132,22 @@ for ii in range(nhours):
         rate = (ii + 1) / nsec
         eta = nleft/rate
         print('ETA: %.1f minutes' % (eta/60))
+    else:
+        # Update X/y where relevant
+        regressor.update_Xy(Xnew=Xtrain, ynew=ytrain)
+    # Do inference
     tmp_pred = regressor.predict(X_now)
     if isinstance(tmp_pred, np.ndarray):
         tmp_pred = pd.DataFrame(tmp_pred).melt(None,None,'lead','pred')
-    tmp_pred = tmp_pred.assign(lead=lambda x: x.lead+1,date_rt=time_ii)
+    tmp_pred['date_rt'] = time_ii
+    if tmp_pred.lead.min() == 0:
+        tmp_pred['lead'] += 1
     holder.append(tmp_pred)
+
+
 # Merge and add labels
 df_res = pd.concat(holder).reset_index(None,True)
-df_res = df_res.assign(date_pred=lambda x: x.date_rt + x.lead*pd.offsets.Hour(1))    
+df_res = df_res.assign(date_pred=lambda x: x.date_rt + x.lead*pd.offsets.Hour(1))
 df_res = df_res.merge(pd.DataFrame({'date_rt':dates,'y_rt':yval}))
 df_res = df_res.merge(pd.DataFrame({'date_pred':dates,'y':yval}))
 df_res = df_res.sort_values(['date_rt','lead']).reset_index(None,True)
@@ -151,8 +163,8 @@ if di_model is not None:
     fn_di = '_'.join(fn_di)
 else:
     fn_di = 'None'
-fn_res = pd.DataFrame({'v1':['lead', 'lag', 'dtrain', 'h_retrain', 'ylbl', 'model_name','model_args'], 
-                       'v2':[lead, lag, dtrain, h_retrain, ylbl, model_name,fn_di]})
+fn_res = pd.DataFrame({'v1':['lead', 'lag', 'dtrain', 'h_rtrain', 'ylbl', 'model_name','model_args'], 
+                       'v2':[lead, lag, dtrain, h_rtrain, ylbl, model_name,fn_di]})
 fn_res.v2 = fn_res.v2.astype(str).str.replace('\\_n\\_jobs\\-[0-9]{1,2}','',regex=True)
 
 #########################################
@@ -165,8 +177,10 @@ cn_ord = ['y_delta','pred_delta','date_rt','lead']
 
 # (1) Calculate spearman and MAE
 perf_reg = df_res.groupby(cn_reg).apply(get_reg_score).reset_index()
-perf_reg = perf_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
-perf_reg = perf_reg.reset_index().rename(columns={'level_2':'iqr'})
+perf_reg = perf_reg.melt(cn_reg,None,'metric')
+perf_reg = perf_reg.groupby(cn_gg).value.apply(lambda x: get_iqr(x,add_n=True)).reset_index()
+perf_reg = perf_reg.drop(columns='level_'+str(len(cn_gg))).melt(cn_gg+['n'],None,'iqr')
+perf_reg = perf_reg.assign(n=lambda x: x.n.astype(int)).sort_values(cn_gg).reset_index(None, True)
 tmp_reg = pd.DataFrame(np.tile(fn_res.v2.values,[perf_reg.shape[0],1]),columns=fn_res.v1)
 tmp_reg.drop(columns='lead',inplace=True)
 perf_reg = pd.concat([perf_reg,tmp_reg],1)
@@ -179,10 +193,12 @@ perf_ord = perf_ord.query('pred_delta == 1').reset_index(None, True).drop(column
 tmp_ord = pd.DataFrame(np.tile(fn_res.v2.values,[perf_ord.shape[0],1]),columns=fn_res.v1)
 tmp_ord.drop(columns='lead',inplace=True)
 perf_ord = pd.concat([perf_ord,tmp_ord],1)
+# Assign IQR to match reg
+perf_ord = perf_ord.assign(iqr='med').rename(columns={'den':'n'})
 
 # (3) Do boostrap to get the standard errors
-holder_reg, holder_ord = [], []
 n_bs = 1000
+holder_reg, holder_ord = [], []
 stime = time()
 for i in range(n_bs):
     if (i + 1) % 5 == 0:
@@ -193,8 +209,8 @@ for i in range(n_bs):
         print('bootstrap ETA: %i seconds (%i left)' % (seta, nleft))
     bs_res = df_res.sample(frac=1,replace=True,random_state=i).reset_index(None,True)
     # Regression
-    bs_reg = bs_res.groupby(cn_reg).apply(get_reg_score).reset_index()
-    bs_reg = bs_reg.melt(cn_reg,None,'metric').groupby(cn_gg).value.apply(get_iqr)
+    bs_reg = bs_res.groupby(cn_reg).apply(get_reg_score).reset_index().melt(cn_reg,None,'metric')
+    bs_reg = bs_reg.groupby(cn_gg).value.apply(get_iqr,ret_df=False)
     bs_reg = bs_reg.reset_index().rename(columns={'level_2':'iqr'})
     bs_reg = bs_reg.assign(value=lambda x: np.where(x.metric == 'MAE',-x.value,x.value),
             iqr=lambda x: np.where(x.metric == 'MAE',x.iqr.map(di_swap),x.iqr))
@@ -216,6 +232,10 @@ bs_ord = bs_ord.reset_index().drop(columns='level_2')
 # Merge with existing
 perf_reg = perf_reg.merge(bs_reg,'left',gg_reg)
 perf_ord = perf_ord.merge(bs_ord,'left',gg_ord)
+assert ~any_diff(perf_ord.columns, perf_reg.columns)
+
+# Merge
+perf_agg = pd.concat([perf_reg, perf_ord]).reset_index(None, True)
 
 ########################
 # --- STEP 5: SAVE --- #
@@ -223,7 +243,7 @@ perf_ord = perf_ord.merge(bs_ord,'left',gg_ord)
 fn_write = fn_res.assign(v3=lambda x: x.v1 + '=' + x.v2.astype(str))
 fn_write = fn_write.v3.str.cat(sep='+')+'.csv'
 fn_write = 'month='+str(month)+'+'+fn_write
-di_res = {'scores':df_res, 'reg':perf_reg, 'ord':perf_ord}
+di_res = {'scores':df_res, 'agg':perf_agg}
 
 # Save predictions for later
 for fold in di_res:
@@ -233,7 +253,6 @@ for fold in di_res:
     di_res[fold].to_csv(path, index=False)
 
 # Save the model class for later
-
 fn_pickle = fn_write.replace('.csv','.pickle')
 path_pickle = os.path.join(dir_model, 'model', fn_pickle)
 if write_model:
