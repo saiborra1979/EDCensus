@@ -170,7 +170,8 @@ fn_res.v2 = fn_res.v2.astype(str).str.replace('\\_n\\_jobs\\-[0-9]{1,2}','',rege
 #########################################
 # --- STEP 4: GET MODEL PERFORMANCE --- #
 
-cn_reg = ['year','woy','lead']
+#cn_reg = ['year','woy','lead']
+cn_reg = ['lead']
 cn_gg = ['lead', 'metric']
 di_swap = {'med':'med', 'lb':'ub', 'ub':'lb'}
 cn_ord = ['y_delta','pred_delta','date_rt','lead']
