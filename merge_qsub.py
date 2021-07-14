@@ -30,8 +30,48 @@ fn_test = os.listdir(dir_test)
 
 assert all([mdl in fn_test for mdl in model_list])
 
-################################
-# --- (1) LOAD IN THE DATA --- #
+##################################
+# --- (1) MERGE AGG BY MONTH --- #
+
+holder = []
+for model in model_list:
+    print('Model: %s' % model)
+    path_model = os.path.join(dir_test, model)
+    path_model_agg = os.path.join(path_model, 'agg')
+    fn_model_agg = pd.Series(os.listdir(path_model_agg))
+    fn_model_agg = fn_model_agg[fn_model_agg.str.contains('\\.csv$')]
+    # Split into the different categories
+    dat_fn = fn_model_agg.str.split('\\+',1,True).rename(columns={0:'month',1:'hp'})
+    dat_fn = dat_fn[dat_fn.month.str.contains('^month')].reset_index(None, True)
+    # Specific hyperparameters
+    hp_fn = pd.Series(dat_fn.hp.unique())
+    print('Model %s has %i hyperparameter configurations' % (model, len(hp_fn)))
+    for hp in hp_fn:
+        u_months = pd.Series(dat_fn.query('hp==@hp').month.unique())
+        tmp_fn = u_months + '+' + hp
+        tmp_holder_agg = []
+        for j, fn in enumerate(tmp_fn):
+            tmp_agg = pd.read_csv(os.path.join(path_model_agg,fn))
+            tmp_agg.insert(0,'month',u_months[j])
+            tmp_holder_agg.append(tmp_agg)
+        # Merge and overwrite
+        tmp_agg = pd.concat(tmp_holder_agg).reset_index(None, True)
+        # Calculate the average over months
+        cn_z = find_zero_var(tmp_agg)
+        cn_gg = cn_z + ['lead','metric']
+        tmp_agg.drop(columns='model_args').loc[0]
+        tmp_agg = tmp_agg.groupby(cn_gg).apply(lambda x:  
+            pd.Series({'value':x.value.mean(),'se':x.se.mean(),'n':x.n.sum()})).reset_index()
+        # Recalculate the upper/lower bound
+
+        # Process the model args
+
+        # Add on hp/model
+        holder.append(tmp_agg)
+
+
+############################
+# --- (2) LOAD ORD/REG --- #
 
 holder = []
 for model in model_list:
@@ -82,6 +122,4 @@ for model in model_list:
         holder.append(tmp_agg)
 
 
-qq = pd.DataFrame({'val':np.random.randn(100000),'gg':np.random.choice(['a','b'],100000)})
-qq.groupby('gg').val.std()
 

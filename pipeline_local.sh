@@ -51,7 +51,12 @@ python merge_qsub.py --model_list gp_stacker
 
 echo "(4.B) eval_hyperparameters.py"
 # Will look for most recent GPy folder
-python eval_hyperparameters.py --model_list xgboost
+python eval_hp_agg.py --model_list gp_stacker
+
+
+echo "(4.C) eval_hyperparameters.py"
+# Will look for most recent GPy folder
+python eval_hp.py --model_list xgboost
 
 
 # echo "(4.A) eval_gpy.py"

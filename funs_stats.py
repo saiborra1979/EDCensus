@@ -1,11 +1,42 @@
+import os
 import numpy as np
 import pandas as pd
-from scipy import stats
-from statsmodels.stats.proportion import proportion_confint as propCI
+import multiprocessing
 import statsmodels.api as sm
-from funs_support import stopifnot
+from funs_support import stopifnot, cvec
+from itertools import repeat
+from scipy import stats
+from scipy.stats import spearmanr
+from statsmodels.stats.proportion import proportion_confint as propCI
+from sklearn.metrics import mean_absolute_error as MAE
 
 
+##########################################
+# ---- (1) BASIC SUMMARY STATISTICS ---- # 
+
+# Calculate spearman's rho and MAE for a data.frame with columns "y"/"pred"
+def get_reg_score(x, add_n=False):
+    tmp = pd.Series({'spearman': spearmanr(x.y,x.pred)[0],'MAE':-MAE(x.y,x.pred)})
+    if add_n:
+        tmp = tmp.append(pd.Series({'n':len(x)}))
+    return tmp
+
+# Calculates interquartile range for any array
+def get_iqr(x,alpha=0.25, add_n=False, ret_df=True):
+    tmp = x.quantile([1-alpha,0.5,alpha])
+    tmp.index = ['lb','med','ub']
+    if add_n:
+        tmp = tmp.append(pd.Series({'n':len(x)}))
+    if ret_df:
+        tmp = pd.DataFrame(tmp).T
+    return tmp
+
+# Vectorize t-tests for arrays or means, standard errors, and sample sizes
+"""
+mu{12}: means of groups{12}
+se{12}: standard deviation for groups {12}
+n{12}: sample size for groups{12}
+"""
 def ttest_vec(mu1, mu2, se1, se2, n1, n2, var_eq=False):
     var1, var2 = se1**2, se2**2
     num = mu1 - mu2
@@ -22,16 +53,29 @@ def ttest_vec(mu1, mu2, se1, se2, n1, n2, var_eq=False):
     return tstat, pvals
 
 
-# Function to calculate escalation levels for different columns
-def get_esc_levels(x, cn, esc_bins, esc_lbls):
-    assert isinstance(x,pd.DataFrame)
-    if not isinstance(cn, pd.Series):
-        cn = pd.Series(cn)
-    cn2 = 'esc_' + cn
-    z = x[cn].apply(lambda w: pd.Categorical(pd.cut(w, esc_bins, False, esc_lbls)).codes,0)
-    z.rename(columns=dict(zip(cn,cn2)),inplace=True)
-    return pd.concat([x,z],axis=1)
+# Calculate the concordance for a continuous variable
+def cindex(y, pred):
+    df = pd.DataFrame({'y': y, 'pred': pred}).sort_values('y', ascending=False).reset_index(None, True)
+    mat_pred = np.tile(df.pred, [df.shape[0], 1])
+    mat_y = np.tile(df.y, [df.shape[0], 1])
+    idx_y = cvec(df.y) > mat_y
+    idx_act = cvec(df.pred) > mat_pred
+    idx_equal = cvec(df.pred) == mat_pred
+    nact = idx_act[idx_y].sum()
+    nequal = idx_equal[idx_y].sum()
+    val = (nact + nequal * 0.5) / idx_y.sum()
+    return val
 
+# Function for extracting 
+def get_level(groups, target, gg):
+    cn = groups[0]
+    df = groups[1]
+    out = pd.DataFrame(cn).T.assign(level=find_prec(df, target, gg))
+    return out
+
+
+######################################
+# ---- (2) REGRESSION FUNCTIONS ---- #
 
 def ols(y, x, alpha=0.05):
     assert isinstance(x,np.ndarray) and isinstance(y,np.ndarray)
@@ -55,6 +99,62 @@ def add_bin_CI(df, cn_n, cn_val, method='beta', alpha=0.05):
     holder = pd.concat([df, holder.rename(columns={0: 'lb', 1: 'ub'})],1)
     return holder
 
+
+#####################################
+# ---- (3) PRECISION FUNCTIONS ---- #
+
+# data=res_rest.copy();gg=cn_multi;n_cpus=10
+def parallel_find_prec(data, gg, target, n_cpus=None):
+    data_split = data.groupby(gg)
+    if n_cpus is None:
+        n_cpus = os.cpu_count()-1
+    print('Number of CPUs: %i' % n_cpus)
+    pool = multiprocessing.Pool(processes=n_cpus)
+    data = pd.concat(pool.starmap(get_level, zip(data_split, repeat(target), repeat(gg))))
+    pool.close()
+    pool.join()
+    return data
+
+# # Function that will apply ordinal_lbls() until it finds the precision target
+# # df = res_train.copy(); gg=['month']
+# def ret_prec(level, df, gg, ret_df=False):
+#     cn_sign = ['pred', 'y']
+#     dat2ord = ordinal_lbls(df.copy(), level=level)
+#     dat2ord[cn_sign] = np.sign(dat2ord[cn_sign])
+#     prec = sens_spec_df(df=dat2ord, gg=gg)
+#     if ret_df:
+#         return prec
+#     else:
+#         prec = prec.query('pred==1 & metric=="prec"').value.values[0]
+#     return prec
+
+# # df=res_train.copy(); target=0.8; gg=['month']
+# def find_prec(df, target, gg, tol=0.005, max_iter=50):
+#     level_lb, level_mid, level_ub = 0.01, 0.5, 0.99
+#     prec_lb, prec_mid, prec_ub = ret_prec(level_lb, df=df, gg=gg), ret_prec(level_mid, df=df, gg=gg), ret_prec(level_ub, df=df, gg=gg)
+#     for tick in range(max_iter):
+#         if target < prec_mid:
+#             #print('Mid becomes top')
+#             level_lb, level_mid, level_ub = level_lb, level_lb+(level_mid-level_lb)/2, level_mid
+#         else:
+#             #print('Mid becomes bottom')
+#             level_lb, level_mid, level_ub = level_mid, level_mid+(level_ub-level_mid)/2, level_ub
+#         prec_lb = ret_prec(level_lb, df=df, gg=gg)
+#         prec_mid = ret_prec(level_mid, df=df, gg=gg)
+#         prec_ub = ret_prec(level_ub, df=df, gg=gg)
+#         err_lb, err_mid, err_ub = np.abs(prec_lb-target), np.abs(prec_mid-target), np.abs(prec_ub-target)
+#         err = min(err_lb, err_mid, err_ub)
+#         # print('lb: %0.2f (%0.3f), mid: %0.2f (%0.3f), ub: %0.2f (%0.3f)' %
+#         #       (level_lb, prec_lb, level_mid, prec_mid, level_ub, prec_ub))
+#         if err < tol:
+#             #print('Tolerance met')
+#             break
+#     di_level = {'lb':level_lb, 'mid':level_mid, 'ub':level_ub}
+#     tt = pd.DataFrame({'tt':['lb','mid','ub'],'err':[err_lb, err_mid, err_ub]}).sort_values('err').tt.values[0]
+#     level_star = di_level[tt]
+#     return level_star
+
+
 # --------------------------------------------------------------------------- #
 # --- Function to get ordinal labels for different lower-bounds of the CI --- #
 # --------------------------------------------------------------------------- #
@@ -73,8 +173,6 @@ def ordinal_lbls(df, cn_date, cn_y, cn_y_rt, cn_pred, cn_se, level=0.5):
     cn_val = [cn_y_rt, cn_y, 'hat_pred']
     ymx = max(df[cn_val].max().max() + 1, 49)
     ymi = min(df[cn_val].min().min() - 1, -1)
-    esc_bins = [ymi, 31, 38, 48, ymx]
-    esc_lbls = ['≤30', '31-37', '38-47', '≥48']
     df[cn_val] = df[cn_val].apply(lambda x: pd.Categorical(pd.cut(x, esc_bins, False, esc_lbls)).codes)
     cn_gg = list(np.setdiff1d(df.columns,cn_check+['hat_pred']))
     df = df.melt(cn_gg+[cn_date,cn_y_rt],[cn_y,'hat_pred'],'tt')
