@@ -38,6 +38,10 @@ def find_dir_olu():
         sys.exit('Where are we?!')
     return dir_olu
 
+# R-like functions
+def str_subset(x,pat):
+    return x[x.str.contains(pat,regex=True)]
+
 # ---- FUNCTIONS TO READ/WRITE PICKLES ---- #
 def read_pickle(path):
     assert os.path.exists(path)

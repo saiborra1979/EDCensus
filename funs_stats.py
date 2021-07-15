@@ -9,7 +9,8 @@ from scipy import stats
 from scipy.stats import spearmanr
 from statsmodels.stats.proportion import proportion_confint as propCI
 from sklearn.metrics import mean_absolute_error as MAE
-
+from scipy.stats import norm, chi2
+from funs_support import cvec
 
 ##########################################
 # ---- (1) BASIC SUMMARY STATISTICS ---- # 
@@ -51,6 +52,22 @@ def ttest_vec(mu1, mu2, se1, se2, n1, n2, var_eq=False):
     tstat = num / den
     pvals = 2*np.minimum(dist_null.sf(tstat), dist_null.cdf(tstat))
     return tstat, pvals
+
+
+# Average difference
+def fast_F(x):
+    assert x.columns.get_level_values(0).isin(['value','se']).all()
+    k = x.value.shape[1]
+    assert k == x.se.shape[1]
+    mu = cvec(x.value.mean(1).values)
+    se = cvec(np.sqrt((x.se**2).mean(1)).values)
+    Zhat = (x.value.values - mu) / se
+    Zhat2 = np.sum(Zhat**2, 1)
+    pval = chi2(df=k-1).cdf(np.sum(Zhat**2,1))
+    pval = 2 * np.minimum(pval, 1-pval)
+    zscore = norm.ppf(pval)
+    zscore = np.where(np.abs(zscore) == np.inf, 0, zscore)
+    return zscore, pval
 
 
 # Calculate the concordance for a continuous variable

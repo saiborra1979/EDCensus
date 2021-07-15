@@ -19,7 +19,8 @@ import pandas as pd
 import numpy as np
 from plotnine import *
 from funs_support import date2ymw, find_dir_olu, get_reg_score, get_iqr, gg_save, drop_zero_var
-from funs_stats import get_esc_levels, prec_recall_lbls
+from funs_stats import get_esc_levels, prec_recall_lbls, fast_F
+from funs_esc import esc_lbls, esc_bins
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -34,23 +35,6 @@ cn_ymd = ['year', 'month', 'day']
 cn_ymdh = cn_ymd + ['hour']
 cn_ymdl = cn_ymd + ['lead']
 
-
-from scipy.stats import norm, chi2
-from funs_support import cvec
-# Average difference
-def fast_F(x):
-    assert x.columns.get_level_values(0).isin(['value','se']).all()
-    k = x.value.shape[1]
-    assert k == x.se.shape[1]
-    mu = cvec(x.value.mean(1).values)
-    se = cvec(np.sqrt((x.se**2).mean(1)).values)
-    Zhat = (x.value.values - mu) / se
-    Zhat2 = np.sum(Zhat**2, 1)
-    pval = chi2(df=k-1).cdf(np.sum(Zhat**2,1))
-    pval = 2 * np.minimum(pval, 1-pval)
-    zscore = norm.ppf(pval)
-    zscore = np.where(np.abs(zscore) == np.inf, 0, zscore)
-    return zscore, pval
 
 
 ################################
@@ -84,8 +68,6 @@ lookup_woy = lookup_woy.merge(freq_woy,'inner')
 dat_bl = dat_bl.merge(freq_woy,'inner')
 
 # (iv) Get escalation levels
-esc_bins = [-1000, 31, 38, 48, 1000]
-esc_lbls = ['≤30', '31-37', '38-47', '≥48']
 act_y = get_esc_levels(act_y,['y_rt'],esc_bins, esc_lbls)
 # Create prediction versoin
 pred_y = act_y.rename(columns={'date_rt':'date_pred','y_rt':'y','esc_y_rt':'esc_y'})
