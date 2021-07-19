@@ -26,7 +26,8 @@ cd /hpf/largeprojects/agoldenb/edrysdale/ED_lvl1/CensusFlow || return
 source set_env.sh
 
 # Run python script
-python -u run_mdl.py --month $month --model_name $model_name --model_args $model_args --ylbl census_max --lead 24 --lag 24 --dtrain $dtrain --h_rtrain $rtrain --write scores --write_model
+python -u run_mdl.py --month $month --model_name $model_name --model_args $model_args --ylbl census_max --lead 24 --lag 24 --dtrain $dtrain --h_rtrain $rtrain
+# --write_scores --write_model
 
 echo "End of hpf_xgboost.sh"
 
