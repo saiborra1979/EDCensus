@@ -26,12 +26,12 @@ di_metric = {'MAE':'MAE', 'spearman':'Spearman', 'sens':'Sensivitiy','prec':'Pre
 
 path_qsub = os.path.join(dir_test, 'res_merge_qsub.csv')
 df_qsub = pd.read_csv(path_qsub, header=[0, 1])
-df_qsub.rename(columns={'Unnamed: 0_level_1':'model','model':'base'},inplace=True)
+# df_qsub.rename(columns={'Unnamed: 0_level_1':'model','model':'base'},inplace=True)
 df_qsub.columns = df_qsub.columns.droplevel(0)
 
-# (ii) Load the benchmark result
-path_bl = os.path.join(dir_test,'bl_hour.csv')
-dat_bl = pd.read_csv(path_bl)
+# # (ii) Load the benchmark result
+# path_bl = os.path.join(dir_test,'bl_hour.csv')
+# dat_bl = pd.read_csv(path_bl)
 
 ##############################
 # --- (2) MERGE BY MONTH --- #
@@ -81,6 +81,10 @@ df_sup = df_sup.melt(['model','lead','metric'],cn_int,'msr','star')
 df_sup.metric = pd.Categorical(df_sup.metric,list(di_metric)).map(di_metric)
 df_sup.msr = pd.Categorical(df_sup.msr,list(di_int)).map(di_int)
 
+df_sup_n = df_sup.groupby(['model','metric','msr','star']).size().reset_index()
+df_sup_n.rename(columns={0:'n'},inplace=True)
+df_sup_n = df_sup_n.assign(star=lambda x: pd.Categorical(x.star, np.sort(np.unique(x.star))))
+
 ####################
 # --- (4) PLOT --- #
 
@@ -93,8 +97,21 @@ gg_sup_hp = (pn.ggplot(df_sup,pn.aes(x='lead',y='star',color='metric')) +
     pn.labs(x='Forecasting lead',y='Winning parameter (Days)'))
 gg_save(fn='gg_sup_hp.png',fold=dir_figures,gg=gg_sup_hp,width=16,height=4)
 
+# -- (ii) Supremum by freq -- #
+gg_sup_hp_n = (pn.ggplot(df_sup_n,pn.aes(x='star',y='n',color='metric')) + 
+    pn.theme_bw() + 
+    pn.geom_point() + 
+    pn.theme(subplots_adjust={'wspace': 0.25,'hspace': 0.25}) + 
+    pn.facet_wrap('~msr',scales='free') + 
+    pn.labs(x='Hyperparameter value',y='# of leads (/24)'))
+gg_save(fn='gg_sup_hp_n.png',fold=dir_figures,gg=gg_sup_hp_n,width=14,height=3.5)
 
-# -- (ii) Full information -- #
+
+
+
+
+
+# -- (iii) Full information -- #
 posd = pn.position_dodge(0.8)
 for metric in df_agg.metric.unique():
     print('~~~ Metric: %s ~~~' % metric)

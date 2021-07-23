@@ -13,7 +13,7 @@ model_list = ['gp_stacker']
 import os
 import pandas as pd
 import numpy as np
-from funs_support import find_dir_olu, read_pickle
+from funs_support import find_dir_olu, read_pickle, drop_zero_var
 
 # Set up folders
 dir_base = os.getcwd()
@@ -32,10 +32,9 @@ assert all([mdl in fn_test for mdl in model_list])
 
 idx = pd.IndexSlice
 
+
 ##################################
 # --- (1) MERGE AGG BY MONTH --- #
-
-from funs_support import find_zero_var, drop_zero_var, find_nonzero_var
 
 holder = []
 for model in model_list:
@@ -58,11 +57,23 @@ for model in model_list:
     # Merge model
     res_agg = pd.concat(holder_model).reset_index(None, True)
     res_agg = drop_zero_var(res_agg)
+    # Add model to the base column
     res_agg.insert(0,'model',model)
+    res_agg.columns = res_agg.columns.insert(0,('base','model')).drop(('model',''))    
     holder.append(res_agg)
     del holder_model, res_agg
 # Merge all
 res_all = pd.concat(holder).reset_index(None, True)
 res_all.to_csv(os.path.join(dir_test, 'res_merge_qsub.csv'), index=False)
+
+
+####################################
+# --- (2) MISSING PERMUTATIONS --- #
+
+cn_int = ['lead','month','dtrain','h_rtrain','nval']
+res_all.columns = res_all.columns.droplevel(0)
+res_all[cn_int] = res_all[cn_int].astype(int)
+
+# Find the missing values
 
 print('~~~ END OF merge_qsub.py ~~~')
