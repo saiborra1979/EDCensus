@@ -21,8 +21,8 @@ write_scores = args.write_scores
 write_model = args.write_model
 
 # # For debugging
-# dtrain=15; h_rtrain=int(24*15); lag=24; lead=24; month=9
-# model_args='base=rxgboost,nval=168,max_iter=100,lr=0.1,max_cg=10000,n_trees=100,depth=3,n_jobs=6'
+# dtrain=366; h_rtrain=24; lag=24; lead=24; month=9
+# model_args='base=rxgboost,nval=48,max_iter=100,lr=0.1,max_cg=10000,n_trees=100,depth=3,n_jobs=3'
 # model_name='gp_stacker'; ylbl='census_max'; write_scores=False; write_model=False
 
 # Load modules
@@ -106,24 +106,31 @@ print('Training offset: %s' % offset_train)
 # --- STEP 3: TRAIN BASELINE MODEL --- #
 
 # All model classes a cn dictionary with ohe, cont, and bin
-#   this is passed into the funs_encode
-cn_cont = ['census_max','census_var','tt_arrived','tt_discharged', 'is_holiday']
-di_cn = {'ohe':['hour','dow'], 'bin':None, 'cont':cn_cont}
+cn_cont = ['census_max','census_var','tt_arrived','tt_discharged']
+cn_ohe = ['month','day','hour','dow','is_holiday']
+cn_bin = []
+di_cn = {'ohe':cn_ohe, 'bin':cn_bin, 'cont':cn_cont}
 cn_all = list(df_X.columns)
+cn_use = sum(list(di_cn.values()), [])
+# Check that all columns can be bound
+assert all([cn in cn_all for cn in cn_use])
+
 
 holder = []
 stime = time()
 for ii in range(nhours):
+    # break
     time_ii = dmin + pd.DateOffset(hours=ii)  # Current day/hour
     s_train = time_ii - offset_train  # start time
     idx_train = ((dates >= s_train) & (dates <= time_ii)).values
     dates_train = dates[idx_train].reset_index(None,True)
-    ytrain, Xtrain = yval[idx_train].copy(), df_X[idx_train].copy()
+    ytrain = yval[idx_train].copy()
+    Xtrain = df_X.loc[idx_train, cn_use].copy()
     X_now = Xtrain[-(lag+1):]  # Ensure enough rows to calculate lags
     if ii % h_rtrain == 0:
         print('Training range: %s' % (get_date_range(dates_train)))
         print('Current time: %s' % time_ii)
-        enc_yX = yX_process(cn=cn_all, lead=lead, lag=lag, 
+        enc_yX = yX_process(cn=cn_use, lead=lead, lag=lag,
                 cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], cn_bin=di_cn['bin'])
         enc_yX.fit(X=Xtrain)
         # break

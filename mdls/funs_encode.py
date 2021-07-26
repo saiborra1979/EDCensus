@@ -13,16 +13,19 @@ def rvec(x):
 def cvec(x):
     return rvec(x).T
 
-# leads=24; n_bins=5
+# cn=cn_use; lead=lead; lag=lag
+# cn_ohe=di_cn['ohe']; cn_cont=di_cn['cont']; cn_bin=di_cn['bin']
+# self = yX_process(cn=cn_use, lead=lead, lag=lag, cn_ohe=di_cn['ohe'], cn_cont=di_cn['cont'], cn_bin=di_cn['bin'])
+# del cn, cn_ohe, cn_cont, cn_bin, self
 class yX_process():
     def __init__(self, cn, cn_ohe=None, cn_bin=None, cn_cont=None, n_bins=5, lead=24, lag=24):
         self.lead, self.lag = lead, lag
         self.cn_all = pd.Series(cn)
         self.di_cn = {'ohe':cn_ohe, 'bin':cn_bin, 'cont':cn_cont}
-        self.enc_X = {'ohe':OneHotEncoder(dtype=int), 
+        self.enc_X = {'ohe':OneHotEncoder(dtype=int, drop='if_binary'),
                     'bin':KBinsDiscretizer(n_bins=n_bins,strategy='quantile'), 
                     'cont':MinMaxScaler()}
-        self.di_none = {k:v is None for k,v in self.di_cn.items()}
+        self.di_none = {k: (v is None) or (v == [])  for k,v in self.di_cn.items()}
         for k in self.di_cn:  # Check either lists or empty
             assert isinstance(self.di_cn[k],list) or self.di_cn[k] is None
             if not self.di_none[k]:
@@ -41,13 +44,17 @@ class yX_process():
                 tmp_cn = self.di_X.query('tt==@k')
                 self.enc_X[k].fit(X[tmp_cn.cn])
                 if k == 'ohe':
-                    self.p += sum([len(z) for z in self.enc_X[k].categories_])
-                    tmp1, tmp2 = tmp_cn.cn.to_list(), self.enc_X[k].categories_
-                    tmp3 = [[cn+'_'+str(int(v)) for v in vals] for cn, vals in zip(tmp1, tmp2)]
+                    tmp_cn = tmp_cn.cn.to_list()
+                    tmp_cat = self.enc_X[k].categories_
+                    if self.enc_X[k].drop == 'if_binary':
+                        tmp_cat = [z[[1]] if len(z)==2 else z for z in tmp_cat]
+                    self.p += sum([len(z) for z in tmp_cat])
+                    tmp3 = [[cn+'_'+str(int(v)) for v in vals] for cn, vals in zip(tmp_cn, tmp_cat)]
                 if k == 'bin':
                     self.p += sum([len(z)-1 for z in self.enc_X[k].bin_edges_])
-                    tmp1, tmp2 = tmp_cn.cn.to_list(), self.enc_X[k].bin_edges_
-                    tmp3 = [[cn+'_'+str(int(vals[i]))+'-'+str(int(vals[i+1])) for i in range(len(vals)-1)] for cn, vals in zip(tmp1, tmp2)]
+                    tmp_cn = tmp_cn.cn.to_list()
+                    tmp_edge = self.enc_X[k].bin_edges_
+                    tmp3 = [[cn+'_'+str(int(vals[i]))+'-'+str(int(vals[i+1])) for i in range(len(vals)-1)] for cn, vals in zip(tmp_cn, tmp_edge)]
                 if k == 'cont':
                     q1 = pd.Series(np.tile(tmp_cn.cn,self.lag+1))
                     q2 = pd.Series(np.repeat(np.arange(self.lag+1),len(tmp_cn.cn)))
@@ -76,6 +83,7 @@ class yX_process():
             X = np.concatenate(lst,axis=1)
         else:
             X = sparse.hstack(lst).toarray()
+        assert X.shape[1] == len(self.cn_X)
         X = X[self.lag:]  # Remove missing values from lag
         if rdrop > 0:
             X = X[:-rdrop]
