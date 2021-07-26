@@ -1,10 +1,6 @@
-"""
-SCRIPT TO PERFORM RAW PROCESSING
-NUMBER OF PATIENT AT EACH TIME POINT THAT A NEW PATIENT ARRIVES OR IS DISCHARGED
-"""
-
 # Load in the required modules
 import os
+import holidays
 import numpy as np
 import pandas as pd
 from funs_support import ljoin, date2ymdh, find_dir_olu, ymdh2date
@@ -226,8 +222,8 @@ long_census.to_csv(os.path.join(dir_flow,'long_census.csv'),index=False)
 hourly_tt = dat_long.groupby(cn_date + ['tt']).size().reset_index()
 hourly_tt = hourly_tt.pivot_table(0, cn_date[:-1] + ['tt'], 'hour').fillna(0).reset_index().melt(cn_date[:-1] + ['tt'])
 hourly_tt = hourly_tt.pivot_table('value', cn_date, 'tt').fillna(0).add_prefix('tt_').astype(int).reset_index()
-hourly_tt = hourly_tt.assign(date=lambda x: pd.to_datetime(
-    x.year.astype(str) + '-' + x.month.astype(str) + '-' + x.day.astype(str) + ' ' + x.hour.astype(str) + ':00:00'))
+# Provide dates
+hourly_tt['date'] = ymdh2date(hourly_tt)
 # Subset
 hourly_tt = hourly_tt[(hourly_tt.date >= dt_min) & (hourly_tt.date <= dt_max)].reset_index(None, True)
 # Long version for benchmarks
@@ -330,14 +326,23 @@ dat_DI_flow = hourly_tt[cn_date].merge(dat_DI_flow, 'left', cn_date).fillna(0).a
 # q2 = hourly_census.drop(columns=['census_var']).merge(q2, 'left', cn_date).fillna(0).astype(int)
 # q2.to_csv(os.path.join(dir_flow, 'all_labs.csv'), index=True)
 
+################################
+# --- STEP 7: GET HOLIDAYS --- #
+
+on_holidays = holidays.Canada(prov='ON')
+is_holiday = hourly_tt.date.dt.strftime('%Y-%m-%d').apply(lambda x: x in on_holidays,1)
+hourly_holiday = hourly_tt[cn_date].assign(is_holiday=is_holiday.astype(int))
+
+
 ########################################
-# --- STEP 7: MERGE ALL DATA TYPES --- #
+# --- STEP 8: MERGE ALL DATA TYPES --- #
 
 # All features/labels
 hourly_yX = hourly_census.merge(hourly_tt.drop(columns='date'), 'left', cn_date)
 hourly_yX = hourly_yX.merge(holder_avg_mds, 'left', cn_date).merge(holder_u_mds, 'left', cn_date)
 hourly_yX = hourly_yX.merge(holder_num, 'left', cn_date).merge(hourly_fac, 'left', cn_date)
 hourly_yX = hourly_yX.merge(dat_labs_flow, 'left', cn_date).merge(dat_DI_flow, 'left', cn_date)
+hourly_yX = hourly_yX.merge(hourly_holiday, 'left', cn_date)
 assert hourly_yX.notnull().all().all()
 # Add on day_of_week and date
 hourly_yX.insert(0,'date',ymdh2date(hourly_yX[cn_date]))

@@ -1,12 +1,10 @@
+# Load modules
 import os
 import pandas as pd
 import numpy as np
 import plotnine as pn
-from plotnine.facets.facet import facet
-from plotnine.facets.facet_wrap import facet_wrap
-from funs_support import find_dir_olu, find_zero_var, str_subset, gg_save
-from funs_stats import get_esc_levels, prec_recall_lbls, fast_F
-from funs_esc import esc_lbls, esc_bins
+from funs_parallel import parallel_perf, get_perf_month
+from funs_support import find_dir_olu, gg_save, any_diff
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -36,30 +34,6 @@ df_qsub.columns = df_qsub.columns.droplevel(0)
 ##############################
 # --- (2) MERGE BY MONTH --- #
 
-from funs_support import any_diff
-import multiprocessing
-
-def get_perf_month(groups):
-    cn = groups[0]
-    df = groups[1]
-    res1 = pd.DataFrame({'n':df.n.sum(), 'value':df.value.mean(),
-            'se':np.sqrt( np.sum(df.se**2 / df.n)) },index=[0])
-    res2 = df.head(1).drop(columns=['n','value','se','month']).reset_index(None,True)
-    res = pd.concat([res2, res1],axis=1)
-    return res
-
-# data=res_rest.copy();gg=cn_multi;n_cpus=10
-def parallel_perf(data, gg, fun, n_cpus=None):
-    data_split = data.groupby(gg)
-    if n_cpus is None:
-        n_cpus = max(os.cpu_count()-1, 1)
-    print('Number of CPUs: %i' % n_cpus)
-    pool = multiprocessing.Pool(processes=n_cpus)
-    res = pd.concat(pool.map(fun, data_split))
-    pool.close()
-    pool.join()
-    return res
-
 cn_gg = ['model', 'metric', 'lead', 'dtrain', 'h_rtrain', 'nval'] 
 cn_val = ['month', 'n', 'se', 'value']
 assert not any_diff(df_qsub.columns, cn_gg + cn_val)
@@ -68,8 +42,8 @@ df_agg.reset_index(None, True, True)
 # Convert the retraining/validation set into days
 
 # Convert to daily from hourly
-df_agg.h_rtrain = (df_agg.h_rtrain/24).astype(int)
-df_agg.nval = (df_agg.nval/24).astype(int)
+df_agg['h_rtrain'] = (df_agg.h_rtrain/24).astype(int)
+df_agg['nval'] = (df_agg.nval/24).astype(int)
 
 
 #############################
@@ -85,6 +59,7 @@ df_sup_n = df_sup.groupby(['model','metric','msr','star']).size().reset_index()
 df_sup_n.rename(columns={0:'n'},inplace=True)
 df_sup_n = df_sup_n.assign(star=lambda x: pd.Categorical(x.star, np.sort(np.unique(x.star))))
 
+
 ####################
 # --- (4) PLOT --- #
 
@@ -98,18 +73,14 @@ gg_sup_hp = (pn.ggplot(df_sup,pn.aes(x='lead',y='star',color='metric')) +
 gg_save(fn='gg_sup_hp.png',fold=dir_figures,gg=gg_sup_hp,width=16,height=4)
 
 # -- (ii) Supremum by freq -- #
-gg_sup_hp_n = (pn.ggplot(df_sup_n,pn.aes(x='star',y='n',color='metric')) + 
+gg_sup_hp_n = (pn.ggplot(df_sup_n.query('n>0'),pn.aes(x='star',y='n',color='metric')) +
     pn.theme_bw() + 
-    pn.geom_point() + 
+    pn.geom_point() +
+    pn.scale_y_continuous(limits=[0,24],breaks=list(range(2,25,2))) +
     pn.theme(subplots_adjust={'wspace': 0.25,'hspace': 0.25}) + 
     pn.facet_wrap('~msr',scales='free') + 
     pn.labs(x='Hyperparameter value',y='# of leads (/24)'))
 gg_save(fn='gg_sup_hp_n.png',fold=dir_figures,gg=gg_sup_hp_n,width=14,height=3.5)
-
-
-
-
-
 
 # -- (iii) Full information -- #
 posd = pn.position_dodge(0.8)
@@ -126,9 +97,8 @@ for metric in df_agg.metric.unique():
         pn.geom_point(size=2,position=posd) + 
         pn.scale_color_discrete(name='Days to retrain') + 
         pn.scale_shape_manual(name='# of validation days',values=shpz) + 
-        facet_wrap('~lead',labeller=pn.label_both,scales='free_y',nrow=4))
+        pn.facet_wrap('~lead',labeller=pn.label_both,scales='free_y',nrow=4))
     gg_save(fn=tmp_fn,fold=dir_figures,gg=tmp_gg,width=22,height=12)
-
 
 
 # #############################

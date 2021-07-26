@@ -1,12 +1,28 @@
-# # Calls class from ~/mdls folder
+# run_mdl script that support multiple y labels
+
+"""
+ylbl:           Which column(s) should be used for forecast?
+xlbl:           Which column(s) should be used for the features? (ylbl is automatically included as a lagged feature)
+lead:           Hours of the forecasting horizon to use (default=24)
+lag:            Number of default lags to use for X/y (default=24)
+month:          Model is trained for this specific month (1==March 2020)
+dtrain:         # of training days
+h_rtrain:       # of hours before retraining (i.e. 24==1 nightly)
+model_name:     Model to use from ~/mdls
+model_args:     Optional arguments for model class (e.g. n_trees=100,depth=3,...)
+write_scores:   Should model scores be written (default==False)
+write_model:    Should model class be pickled? (default==False)
+"""
+
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--lead', type=int, default=None, help='Number of leads to forecast')
-parser.add_argument('--lag', type=int, default=None, help='Number of lags to use in X')
-parser.add_argument('--month', type=int, default=1, help='Which month to use since March-2020 onwards')
-parser.add_argument('--dtrain', type=int, default=5, help='# of training days')
-parser.add_argument('--h_rtrain', type=int, default=24, help='Frequency of retraining')
-parser.add_argument('--ylbl', type=str, default=None, help='Column from hourly_yX.csv to forecast')
+parser.add_argument('--ylbl', type=str, default=None, help='Column(s) from hourly_yX.csv to forecast')
+parser.add_argument('--xlbl', type=str, default=None, help='Column(s) from hourly_yX.csv to use as features')
+parser.add_argument('--lead', type=int, default=24, help='Number of leads to forecast')
+parser.add_argument('--lag', type=int, default=24, help='Number of lags to use in X')
+parser.add_argument('--month', type=int, default=None, help='Which month to use since March-2020 onwards')
+parser.add_argument('--dtrain', type=int, default=None, help='# of training days')
+parser.add_argument('--h_rtrain', type=int, default=None, help='Frequency of retraining')
 parser.add_argument('--model_name', type=str, default=None, help='Model to use from ~/mdls')
 parser.add_argument('--model_args', type=str, default=None, 
     help='Optional arguments for model class (e.g. n_trees=100,depth=3,...)')
@@ -15,12 +31,14 @@ parser.add_argument('--write_model', default=False, action='store_true')
 
 args = parser.parse_args()
 print(args)
+ylbl, xlbl = args.ylbl, args.xlbl
 lead, lag, month, dtrain, h_rtrain = args.lead, args.lag, args.month, args.dtrain, args.h_rtrain
-ylbl, model_name, model_args = args.ylbl, args.model_name, args.model_args
+model_name, model_args = args.model_name, args.model_args
 write_scores = args.write_scores
 write_model = args.write_model
 
 # # For debugging
+
 # dtrain=15; h_rtrain=int(24*15); lag=24; lead=24; month=9
 # model_args='base=rxgboost,nval=168,max_iter=100,lr=0.1,max_cg=10000,n_trees=100,depth=3,n_jobs=6'
 # model_name='gp_stacker'; ylbl='census_max'; write_scores=False; write_model=False
@@ -107,7 +125,7 @@ print('Training offset: %s' % offset_train)
 
 # All model classes a cn dictionary with ohe, cont, and bin
 #   this is passed into the funs_encode
-cn_cont = ['census_max','census_var','tt_arrived','tt_discharged', 'is_holiday']
+cn_cont = ['census_max','census_var','tt_arrived','tt_discharged'] #'u_mds10h'
 di_cn = {'ohe':['hour','dow'], 'bin':None, 'cont':cn_cont}
 cn_all = list(df_X.columns)
 
