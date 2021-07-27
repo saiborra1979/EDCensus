@@ -3,8 +3,12 @@ import os
 import pandas as pd
 import numpy as np
 import plotnine as pn
+from plotnine.geoms.geom_boxplot import geom_boxplot
+from plotnine.geoms.geom_histogram import geom_histogram
+from plotnine.labels import ggtitle
+from plotnine.themes.theme_bw import theme_bw
 from funs_parallel import parallel_perf, get_perf_month
-from funs_support import find_dir_olu, gg_save, any_diff
+from funs_support import find_dir_olu, gg_save, any_diff, drop_unnamed
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -60,8 +64,52 @@ df_sup_n.rename(columns={0:'n'},inplace=True)
 df_sup_n = df_sup_n.assign(star=lambda x: pd.Categorical(x.star, np.sort(np.unique(x.star))))
 
 
+############################
+# --- (4) DISTRIBUTION --- #
+
+dat_prec = df_agg.query('metric=="prec"').reset_index(None,True)
+dat_prec.drop(columns=['model','metric','n','se'], inplace=True)
+
+# (i) More training data is not always better
+dat_prec_dtrain = dat_prec.query('h_rtrain==1 & nval==2').reset_index(None, True)
+dat_prec_dtrain.drop(columns=['h_rtrain','nval'],inplace=True)
+dat_prec_dtrain = dat_prec_dtrain.assign(dtrain=lambda x: pd.Categorical(x.dtrain, np.sort(x.dtrain.unique())))
+
+gg_dtrain = (pn.ggplot(dat_prec_dtrain,pn.aes(y='value',x='dtrain')) + 
+    pn.labs(y='Precision',x='# of training days') + 
+    pn.theme_bw() + 
+    pn.ggtitle('Distribution of forecasting horizon') + 
+    pn.geom_boxplot())
+gg_save(fn='gg_dtrain.png',fold=dir_figures,gg=gg_dtrain,width=6,height=4)
+
+# (ii) More validation data is not always better
+dat_prec_nval = dat_prec.query('dtrain==360 & h_rtrain==1').reset_index(None, True)
+dat_prec_nval.drop(columns=['dtrain','h_rtrain'],inplace=True)
+dat_prec_nval = dat_prec_nval.assign(nval=lambda x: pd.Categorical(x.nval, np.sort(x.nval.unique())))
+
+gg_nval = (pn.ggplot(dat_prec_nval,pn.aes(y='value',x='nval')) + 
+    pn.labs(y='Precision', x='# of validation days') + 
+    pn.theme_bw() + 
+    pn.ggtitle('Distribution of forecasting horizon') + 
+    pn.geom_boxplot())
+gg_save(fn='gg_nval.png',fold=dir_figures,gg=gg_nval,width=6,height=4)
+
+# (iii) Faster retraining is usually better
+dat_prec_rtrain = dat_prec.query('dtrain==360 & nval==2').reset_index(None, True)
+dat_prec_rtrain.drop(columns=['dtrain','nval'],inplace=True)
+dat_prec_rtrain.rename(columns={'h_rtrain':'rtrain'}, inplace=True)
+dat_prec_rtrain = dat_prec_rtrain.assign(rtrain=lambda x: pd.Categorical(x.rtrain, np.sort(x.rtrain.unique())))
+
+gg_rtrain = (pn.ggplot(dat_prec_rtrain,pn.aes(y='value',x='rtrain')) + 
+    pn.labs(y='Precision', x='# of days before retraining') + 
+    pn.theme_bw() + 
+    pn.ggtitle('Distribution of forecasting horizon') + 
+    pn.geom_boxplot())
+gg_save(fn='gg_rtrain.png',fold=dir_figures,gg=gg_rtrain,width=6,height=4)
+
+
 ####################
-# --- (4) PLOT --- #
+# --- (5) PLOT --- #
 
 # -- (i) Supremum by lead -- #
 gg_sup_hp = (pn.ggplot(df_sup,pn.aes(x='lead',y='star',color='metric')) + 

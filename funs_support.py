@@ -42,6 +42,16 @@ def find_dir_olu():
 def str_subset(x,pat):
     return x[x.str.contains(pat,regex=True)]
 
+# Remove column nnames with Unnamed
+def drop_unnamed(x):
+    assert isinstance(x, pd.DataFrame)
+    cn = x.columns
+    cn_drop = list(cn[cn.str.contains('Unnamed')])
+    if len(cn_drop) > 0:
+        x = x.drop(columns=cn_drop)
+    return x
+
+
 # ---- FUNCTIONS TO READ/WRITE PICKLES ---- #
 def read_pickle(path):
     assert os.path.exists(path)
