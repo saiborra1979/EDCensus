@@ -36,7 +36,7 @@ python explore_beds.py
 # --- (3) MODEL RUNS --- #
 
 echo "(3.A) run_bl.py"
-python run_bl.py
+python run_bl.py --ylbl census_max
 
 # Call source pipeline_GPU.sh on HPF
 #   Adjust --dstart 60 --dend 453 with pipeline_HPF.sh for last day
@@ -52,34 +52,6 @@ python merge_qsub.py --model_list gp_stacker
 echo "(4.B) eval_hyperparameters.py"
 # Will look for most recent GPy folder
 python eval_hp_agg.py --model_list gp_stacker
-
-
-echo "(4.C) eval_hyperparameters.py"
-# Will look for most recent GPy folder
-python eval_hp.py --model_list xgboost
-
-
-# echo "(4.A) eval_gpy.py"
-# # Will look for most recent GPy folder
-# python eval_gpy.py
-
-# echo "(4.A) eval_models.py"
-# # Script will compare GP to Lasso/Weighted, and then find the best "groups" for the GP
-# python eval_models.py
-# # output: best_ylbl.csv, best_ypred.csv
-# #         gg_hour, gg_hour2
-# #         gg_perf_{metric}, gg_gpy_perf_{metric}
-# #         gg_grpz_leads, gg_ntrain_leads, gg_grpz_months, gg_leads_agg
-# #         gg_pr_groups_lead, gg_pr_ntrain_lead
-
-# echo "(4.B) eval_escalation.py: Compare performance to escalation"
-# # uses: best_ylbl.csv, best_ypred.csv
-# python eval_escalation.py
-
-# echo "(4.C) eval_retrain.py: Compare retraining stragegies"
-# # Uses the output/flow/test/\{iterative,retrain\} folders to make R2 comparison
-# python eval_retrain.py
-# # output: gg_iter_comp
 
 
 echo "END OF SCRIPT"

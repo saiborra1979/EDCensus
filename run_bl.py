@@ -1,9 +1,22 @@
+# Use yesterday's hourly information
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--ylbl', type=str, default=None, help='Column from hourly_yX.csv to forecast')
+args = parser.parse_args()
+print(args)
+ylbl = args.ylbl
+
+# # For debugging
+# ylbl = 'census_max'
+
 import os
 import numpy as np
 import pandas as pd
 from time import time
 from mdls.funs_encode import yX_process
 from funs_support import find_dir_olu, get_date_range
+from funs_esc import esc_bins, esc_lbls, get_esc_levels
+from funs_stats import prec_recall_lbls, get_reg_score
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()
@@ -11,7 +24,6 @@ dir_output = os.path.join(dir_olu, 'output')
 dir_flow = os.path.join(dir_output, 'flow')
 dir_test = os.path.join(dir_flow, 'test')
 
-ylbl = 'census_max'
 
 ####################################
 # --- STEP 1: LOAD/CREATE DATA --- #
@@ -87,24 +99,70 @@ df_res = pd.concat(holder).reset_index(None,True)
 df_res = df_res.assign(date_pred=lambda x: x.date_rt+x.lead*pd.offsets.Hour(1))
 df_res = df_res.merge(pd.DataFrame({'date_pred':dates,'y':yval}))
 df_res = df_res.merge(pd.DataFrame({'date_rt':dates,'y_rt':yval}))
+
+# Add on the escalation levels
+df_res = get_esc_levels(df_res,['y','y_rt','pred'],esc_bins, esc_lbls)
+df_res = df_res.assign(y_delta=lambda x: np.sign(x.esc_y - x.esc_y_rt),
+                pred_delta = lambda x: np.sign(x.esc_pred - x.esc_y_rt) )
+
+
+#########################################
+# --- STEP 4: GET MODEL PERFORMANCE --- #
+
+cn_reg = ['lead']
+cn_regn = cn_reg + ['n']
+cn_gg = ['lead', 'metric']
+cn_ggn = cn_gg + ['n']
+cn_ord = ['y_delta','pred_delta','date_rt','lead']
+
+# (1) Calculate spearman and MAE
+perf_reg = df_res.groupby(cn_reg).apply(get_reg_score,add_n=True).reset_index()
+perf_reg = perf_reg.melt(cn_regn,None,'metric')
+perf_reg['n'] = perf_reg.n.astype(int)
+
+# (2) Calculate the precision/recall
+perf_ord = prec_recall_lbls(x=df_res[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
+perf_ord = perf_ord.query('pred_delta == 1').reset_index(None, True)
+perf_ord = perf_ord.drop(columns='pred_delta').rename(columns={'den':'n'})
+
+# Merge regression + ordinal
+perf_agg = pd.concat([perf_reg, perf_ord]).reset_index(None, True)
+
+# (3) Do boostrap to get the standard errors
+n_bs = 1000
+holder_agg = []
+stime = time()
+for i in range(n_bs):
+    if (i + 1) % 5 == 0:
+        print(i+1)
+        dtime, nleft = time() - stime, n_bs-(i+1)
+        rate = (i+i)/dtime
+        seta = nleft / rate
+        print('bootstrap ETA: %i seconds (%i left)' % (seta, nleft))
+    # Stratify bootstrap by lead
+    bs_res = df_res.groupby('lead').sample(frac=1,replace=True,random_state=i).reset_index(None,True)
+    # Regression
+    bs_reg = bs_res.groupby(cn_reg).apply(get_reg_score,add_n=True).reset_index()
+    bs_reg = bs_reg.melt(cn_regn,None,'metric').assign(n=lambda x: x.n.astype(int))
+    # Classification
+    bs_ord = prec_recall_lbls(x=bs_res[cn_ord],cn_y='y_delta',cn_pred='pred_delta',cn_idx='date_rt')
+    bs_ord = bs_ord.query('pred_delta == 1').reset_index(None, True)
+    bs_ord = bs_ord.drop(columns='pred_delta').rename(columns={'den':'n'})
+    # Save
+    bs_agg = pd.concat([bs_reg, bs_ord]).assign(bidx=i)
+    holder_agg.append(bs_agg)
+
+# Calculate bootstrap standard error
+bs_agg = pd.concat(holder_agg)
+bs_agg = bs_agg.groupby(cn_gg).value.std(ddof=1).reset_index()
+bs_agg.rename(columns={'value':'se'}, inplace=True)
+# Merge with existing
+perf_agg = perf_agg.merge(bs_agg,'left')
+
+
+########################
+# --- STEP 5: SAVE --- #
+
 # Save for later
-df_res.to_csv(os.path.join(dir_test, 'bl_hour.csv'),index=False)
-
-# from scipy.stats import spearmanr
-# from sklearn.metrics import mean_absolute_error as MAE
-# df_res.groupby('lead').apply(lambda x: MAE(x.y, x.pred))
-# df_res.groupby('lead').apply(lambda x: spearmanr(x.pred, x.y)[0])
-
-# # Make a plot
-# from plotnine import *
-# dir_figures = os.path.join(dir_olu, 'figures', 'census')
-# # df_res.query('lead==1').sort_values(['date_rt','date_pred']).reset_index(None,True).drop(columns=['lead','pred']).head(10)
-# tmp = df_res.assign(gg=lambda x: x.date_rt.dt.strftime('%d.%H').astype(float))
-# gg_tmp = (ggplot(tmp) + theme_bw() + 
-#     geom_point(aes(x='date_rt',y='y_rt'),alpha=0.5,size=0.75) + 
-#     geom_line(aes(x='date_pred',y='pred',color='gg',groups='gg')) +
-#     theme(axis_title_x=element_blank(),axis_text_x=element_text(angle=90)) + 
-#     labs(y='Actual/Predicted') + 
-#     guides(color=False) + 
-#     scale_x_datetime(date_breaks='1 day',date_labels='%d, %m'))
-# gg_save('gg_tmp.png',dir_figures,gg_tmp,7,4)
+df_res.to_csv(os.path.join(dir_test, 'bl_scores.csv'),index=False)
+perf_agg.to_csv(os.path.join(dir_test, 'bl_agg.csv'),index=False)
