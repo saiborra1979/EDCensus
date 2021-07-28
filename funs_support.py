@@ -38,6 +38,27 @@ def find_dir_olu():
         sys.exit('Where are we?!')
     return dir_olu
 
+# Find the real-time folder
+def find_dir_rt():
+    dir_base = os.getcwd()
+    cpu = socket.gethostname()
+    print(cpu)
+    hpf1 = pd.Series(cpu).str.contains('qlogin')[0]
+    hpf2 = pd.Series(cpu).str.contains('node')[0]
+    # Set directory based on CPU name
+    if cpu == 'RT5362WL-GGB':
+        sys.exit('On predator machine')
+    elif cpu == 'snowqueen':
+        sys.exit('On snowqueen machine')
+    elif hpf1 or hpf2:
+        print('On HPF')
+        dir_rt = os.path.join(find_dir_olu(), '..', 'ED_lvl0')
+    else:
+        sys.exit('Where are we?!')
+    return dir_rt
+
+
+
 # R-like functions
 def str_subset(x,pat):
     return x[x.str.contains(pat,regex=True)]

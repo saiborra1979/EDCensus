@@ -17,7 +17,7 @@ depth=3
 
 i=0
 for nval in {24..168..24}; do
-for dtrain in {90..360..90}; do
+for dtrain in {450..450..0}; do
 for rtrain in {24..168..24}; do
 	i=$(($i+1))
 	echo "Iteration: "$i
