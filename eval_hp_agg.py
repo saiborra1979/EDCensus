@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import plotnine as pn
 from funs_parallel import parallel_perf, get_perf_month
-from funs_support import find_dir_olu, gg_save, any_diff, drop_unnamed
+from funs_support import find_dir_olu, gg_save, any_diff
 
 dir_base = os.getcwd()
 dir_olu = find_dir_olu()

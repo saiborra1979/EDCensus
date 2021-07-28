@@ -102,11 +102,18 @@ dat_census = df_yX[['date','y']].copy().assign(smooth= lambda x: x.y.rolling(24)
 dat_census = dat_census.assign(doy=lambda x: pd.to_datetime(x.date.dt.strftime(dfmt)))
 dat_census['hour'] = dat_census.date.dt.hour
 
+# Limits for box
+ymi, ymx = dat_census.y.min(), dat_census.y.max()
+ymx += 10
+xmi = pd.to_datetime('2020-03-01 00:00:00')
+xmx = dat_census.date.max()
+
 gg_census = (pn.ggplot(dat_census, pn.aes(x='date',y='y')) +
     pn.geom_point(size=0.1) + pn.geom_line(size=0.1) +
-    pn.labs(y='Max hourly census') + pn.theme_bw() +
+    pn.scale_y_continuous(limits=(0,150)) + 
+    pn.annotate('rect',xmin=xmi,xmax=xmx,ymin=ymi,ymax=ymx,fill='red',alpha=0.25) +
+    pn.labs(y='Hourly patient volume') + pn.theme_bw() +
     pn.geom_line(pn.aes(x='date',y='smooth'),color='blue') +
-    pn.ggtitle('ED hourly census') +
     pn.theme(axis_text_x=pn.element_text(angle=90), axis_title_x=pn.element_blank()) +
     pn.scale_x_datetime(date_breaks='2 month', date_labels='%b, %Y'))
 gg_save('gg_census.png',dir_figures,gg_census,12,6)

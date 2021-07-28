@@ -107,7 +107,7 @@ def gg_save(fn,fold,gg,width,height):
     path = os.path.join(fold, fn)
     if os.path.exists(path):
         os.remove(path)
-    gg.save(path, width=width, height=height)
+    gg.save(path, width=width, height=height, limitsize=False)
 
 
 def gg_color_hue(n):
@@ -136,12 +136,12 @@ def date2ymdh(x):
     year, month, day, hour = x.dt.year, x.dt.month, x.dt.day, x.dt.hour
     return pd.DataFrame({'year':year, 'month':month, 'day':day, 'hour':hour})
 
-def date2ymw(x,week53=True):
+def date2ymw(x, add_month=True):
     assert isinstance(x, pd.Series)
-    dat = x.dt.isocalendar().drop(columns='day').rename(columns={'week':'woy'})
-    dat.insert(1,'month',x.dt.month)
-    if week53:  # Will ensure week 53 is not split over two years
-        dat = dat.assign(year = lambda x: np.where((x.woy==53)&(x.month==1), x.year-1, x.year))
+    dat = x.dt.isocalendar().rename(columns={'week':'woy'})
+    dat.drop(columns='day', inplace=True)
+    if add_month:
+        dat.insert(1,'month',x.dt.month)
     return dat
 
 def ymd2date(x):
